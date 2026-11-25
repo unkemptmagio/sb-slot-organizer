@@ -9,7 +9,7 @@ Also reports IoStore container-ID clashes (u64 at TOC offset 56): when two paks 
 NOT built yet: `apply` / `revert` and the `.exe` packaging. Why: slot numbers are baked into IoStore pak asset paths, so moving a third-party
 clip needs a rewrite we have not proven safe. See `docs/next.md`.
 
-## fixids (2026-11-25, built, dry run verified on the real install, NOT yet applied in game)
+## fixids (2026-11-25, built, dry run verified on the real install, applied 2026-11-25)
 `python slots.py fixids` lists container-id clashes that stop an anim pak from mounting and the new unique id it would get; `--apply` writes it (game closed), `python slots.py revert` restores the last backup (`slot_backups/ids-*/manifest.json` keeps the old ids and byte offsets). Only anim paks are patched, never the other mod of a clash. Patches the id in all three places it lives (utoc header +56, the ContainerHeader chunk id in the TOC, first 8 bytes of that chunk in the .ucas); refuses when the three disagree or the chunk is compressed. Note: Vortex hard-links mod files (ESAP has 2 links), so the staged copy changes too; a Vortex re-deploy keeps the patch, a re-download of the mod restores the clash.
 
 ## Use
@@ -21,3 +21,7 @@ python slots.py revert
 python tests/slots_test.py
 ```
 Exit code 1 when clashes exist. Cache: `slot_cache.json` (pak path, size, mtime -> slots); a corrupt cache is rebuilt.
+
+## fixids verified in game (2026-11-25 09:44)
+After `fixids --apply` (ESAP 0xcda35a93... -> 0x57925699..., OldDroid 0xfb3161d2... -> 0x37782ade...): ATOOL's `anim3` grew from 338 to 353 clips and ESAP's slots 700, 705 and 709 are now in it (before: absent), so the clash was the cause. OldDroid (307-311) lives under `Monster/CH_M_NA_49/Animation/DO_*` and is not loaded through `anim/<n>`; a name sweep finds none resident, so it is NOT confirmed (play an OldDroid scene to check).
+Lesson: a probe that called `StaticFindObject` on a non-resident path crashed the game at 09:43:39 (a known trigger, see sb-live/docs/live-pak.md). Probe only with `FindAllOf` + name match; never `StaticFindObject`/`LoadAsset` on paths that may not be loaded.
