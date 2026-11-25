@@ -336,8 +336,8 @@ def apply_move(root, game, key, old, new, backup, rewrite=True):
         nt.unlink(); nu.unlink(); raise SystemExit("verification of the rewritten container failed, nothing changed")
     j = {"kind": "move", "pak": key, "old": old, "new": new, "steps": []}
     (backup / "manifest.json").write_text(json.dumps(j, indent=1))      # journal before the first replacement
-    bt = backup / utoc.name; bu = backup / ucas.name
-    os.replace(utoc, bt); os.replace(ucas, bu)                          # originals moved aside (same volume: no copy; a hard link to Vortex staging stays intact)
+    bt = utoc.with_name(utoc.name + ".orig"); bu = ucas.with_name(ucas.name + ".orig")
+    os.replace(utoc, bt); os.replace(ucas, bu)                          # originals renamed to *.orig next to the pak (same volume, instant, not mountable; a hard link to Vortex staging stays intact)
     os.replace(nt, utoc); os.replace(nu, ucas)
     j["steps"] += [{"kind": "swap", "path": str(utoc), "backup": str(bt)}, {"kind": "swap", "path": str(ucas), "backup": str(bu)}]
     external_files(game, old, new, j["steps"], backup, rewrite)
