@@ -109,6 +109,31 @@ def id_clashes(root):
     for k, v in container_ids(root).items(): by[v].append(k)
     return {v: ks for v, ks in by.items() if len(ks) > 1}
 
+def detect_ceiling(game):
+    """highest usable slot: 1000 (ATOOL's own loop bound), or the `limit=` of the AToolSlotLimit mod when it is installed and enabled"""
+    d = pathlib.Path(game) / "Binaries" / "Win64" / "ue4ss" / "Mods" / "AToolSlotLimit"
+    en = d / "enabled.txt"
+    if not (d / "dlls" / "main.dll").is_file() or (en.is_file() and en.read_text(errors="replace").strip() == "0"): return 1000
+    lim = 9999
+    try:
+        for l in (d / "config.txt").read_text(errors="replace").splitlines():
+            if l.strip().startswith("limit="): lim = int(l.split("=", 1)[1])
+    except (OSError, ValueError): pass
+    return max(1000, lim)                            # limit=1000 means "leave ATOOL as is"
+
+def load_reserved(path):
+    """reserved.txt: one slot or range (901-907) per line, # comments. Missing file -> the known fixed slots (Tachy face scenes)."""
+    p = pathlib.Path(path)
+    if not p.is_file(): return set(range(901, 908))
+    out = set()
+    for l in p.read_text(errors="replace").splitlines():
+        l = l.split("#")[0].strip()
+        if not l: continue
+        a, _, b = l.partition("-")
+        try: out |= set(range(int(a), int(b or a) + 1))
+        except ValueError: pass
+    return out
+
 def clashes(inv):
     by = collections.defaultdict(list)
     for k, v in inv.items():
@@ -202,7 +227,7 @@ def revert_fix(backup):
 def main(argv):
     import argparse, time
     ap = argparse.ArgumentParser(prog="slots", description="Stellar Blade anim slot organizer (scan/plan only so far)")
-    ap.add_argument("cmd", choices=["scan", "plan", "fixids", "revert"]); ap.add_argument("--game"); ap.add_argument("--ceiling", type=int, default=1000)
+    ap.add_argument("cmd", choices=["scan", "plan", "fixids", "revert"]); ap.add_argument("--game"); ap.add_argument("--ceiling", type=int, default=None, help="default: auto (1000, or the AToolSlotLimit limit)"); ap.add_argument("--reserved", default="reserved.txt")
     ap.add_argument("--apply", action="store_true", help="fixids: really write (default: dry run)"); ap.add_argument("--backup", default="slot_backups"); ap.add_argument("--cache", default="slot_cache.json"); ap.add_argument("--no-cache", action="store_true")
     a = ap.parse_args(argv); g = find_game(a.game)
     if not g: print("Stellar Blade not found; pass --game <...>\SB or set SB_GAME"); return 2
@@ -211,6 +236,7 @@ def main(argv):
         dirs = sorted(glob.glob(a.backup + "/ids-*"))
         if not dirs: print("no backup in", a.backup); return 2
         print("restored %d container id(s) from %s" % (revert_fix(dirs[-1]), dirs[-1])); return 0
+    if a.ceiling is None: a.ceiling = detect_ceiling(g)
     t = time.time(); inv = scan(g / "Content" / "Paks", None if a.no_cache else a.cache)
     ss = {s for v in inv.values() for s in v}; cl = clashes(inv)
     print("%d paks, %d slots, %d clashes, %d above %d, %d free <= %d  (%d cached, %.2fs)" % (len(inv), len(ss), len(cl), sum(s > a.ceiling for s in ss), a.ceiling, a.ceiling - len([s for s in ss if s <= a.ceiling]), a.ceiling, scan.hits, time.time() - t))
@@ -232,7 +258,7 @@ def main(argv):
         for k, why in skipped: print("  skipped %s: %s" % (k, why))
         print("changed %d container id(s); undo with: python slots.py revert (backup %s)" % (len(done), bk)); return 0
     if a.cmd == "plan":
-        mv = plan(inv, a.ceiling)
+        mv = plan(inv, a.ceiling, reserved=load_reserved(a.reserved))
         for k, o, n in mv: print("  %s: %d -> %d" % (k, o, n))
         print("%d moves proposed (nothing is changed on disk yet)" % len(mv))
     return 1 if cl else 0
