@@ -36,3 +36,9 @@ Ways to apply a patch (none done yet):
 2. Ship only a small override container with the patched `ModActor` (still the author's asset, same permission).
 3. Runtime patch from a UE4SS mod: find `ModActor_C:DataGet1/2/3`, overwrite the `1000` in the function's `Script` bytes in memory (nothing of ATOOL's is redistributed). Needs a native (C++) UE4SS mod or a Lua API that exposes `UFunction.Script`; unverified. Safest on permissions; must be tested for crashes.
 Decoder note: the bytecode uses 8-byte-less script pointers (package-index int32), opcodes as UE 4.26 (`0x1d` IntConst, `0x14` LetBool, `0x68` CallMath, `0x16` EndFunctionParms, `0x07` JumpIfNot).
+
+## Update 2026-11-25 (3): runtime patch feasibility (checked, not built)
+- UE4SS v3.0.1 Lua API (`D:\Modding\SBMods\RE-UE4SS\docs\lua-api`): `UFunction` exposes only `GetFunctionFlags/SetFunctionFlags` and call; `UStruct` only `GetSuperStruct`, `ForEachFunction`, `ForEachProperty`. **No Lua way to read or write a function's `Script` bytes, and no raw memory write.** `UObject:GetAddress()` gives the address but Lua cannot poke it. So a Lua-only patch is not possible.
+- UE4SS itself knows the field: `MemberVariableLayout.ini` has `UStruct::Script = 0x60` (a `TArray<uint8>`). A **native C++ UE4SS mod** could find `/Game/Mods/HD-ATOOL_P/ModActor.ModActor_C:DataGet1..3` at startup and replace the `1d e8 03 00 00` IntConst with a larger one.
+- Tooling on this machine: RE-UE4SS source is at `D:\Modding\SBMods\RE-UE4SS` (cppmods + deps present), Visual Studio 2022 and cargo are installed, **xmake and cmake are not** (needed to build a cppmod; installing means downloading them).
+- Scope reminder: PEFA plays clips by path and was reported to work above 1000, so this patch only matters for ATOOL's own picker, not for PEFA users.
