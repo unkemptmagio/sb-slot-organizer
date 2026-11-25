@@ -1,0 +1,5 @@
+__pycache__/
+slot_cache.json
+dist/
+build/
+*.exe
