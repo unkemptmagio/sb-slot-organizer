@@ -263,4 +263,11 @@ def main(argv):
         print("%d moves proposed (nothing is changed on disk yet)" % len(mv))
     return 1 if cl else 0
 
-if __name__ == "__main__": sys.exit(main(sys.argv[1:]))
+if __name__ == "__main__":
+    dbl = len(sys.argv) == 1                         # double-clicked exe: show the report (fixids dry run) and wait
+    rc = main(sys.argv[1:] or ["fixids"])
+    if dbl and getattr(sys, "frozen", False):
+        print()
+        print("To apply the fix run in a terminal: SlotOrganizer.exe fixids --apply  (game closed). Undo: SlotOrganizer.exe revert")
+        input("Press Enter to close")
+    sys.exit(rc)

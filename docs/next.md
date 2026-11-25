@@ -8,3 +8,5 @@
 6. Slot 660 test pak loads and plays; slot 6666 (same scene, same pak name) does not, so something slot-number specific remains. Find the real threshold (build 1001 / 2000) before promising >1000 slots.
 
 7. fixids: apply it on the real install (ESAP, OldDroid) and confirm in game that slots 700-709 / 307-311 now appear in ATOOL's list (`anim3`); then PyInstaller exe, ceiling auto-detect (9999 when AToolSlotLimit is installed), reserved.txt.
+
+8. Done 2026-11-25: fixids applied + verified for ESAP, ceiling auto-detect, reserved.txt, exe. Left: release zip + README for users, confirm OldDroid in game, GitHub repos (private) for sb-slot-organizer and sb-atool-slot-limit, an installer script for AToolSlotLimit, `plan` apply for our own paks via the port repo.

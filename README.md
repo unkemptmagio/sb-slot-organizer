@@ -12,6 +12,10 @@ clip needs a rewrite we have not proven safe. See `docs/next.md`.
 ## fixids (2026-11-25, built, dry run verified on the real install, applied 2026-11-25)
 `python slots.py fixids` lists container-id clashes that stop an anim pak from mounting and the new unique id it would get; `--apply` writes it (game closed), `python slots.py revert` restores the last backup (`slot_backups/ids-*/manifest.json` keeps the old ids and byte offsets). Only anim paks are patched, never the other mod of a clash. Patches the id in all three places it lives (utoc header +56, the ContainerHeader chunk id in the TOC, first 8 bytes of that chunk in the .ucas); refuses when the three disagree or the chunk is compressed. Note: Vortex hard-links mod files (ESAP has 2 links), so the staged copy changes too; a Vortex re-deploy keeps the patch, a re-download of the mod restores the clash.
 
+## Exe (built 2026-11-25)
+`dist/SlotOrganizer.exe` (PyInstaller one-file, 5.5 MB, not committed): double-click = find the game, report clashes, show what `fixids` would change, wait for Enter. For changes use a terminal: `SlotOrganizer.exe fixids --apply` (game closed), `SlotOrganizer.exe revert`. Rebuild: `python -m PyInstaller --onefile --name SlotOrganizer --distpath dist --workpath build --specpath build slots.py` (`pip install pyinstaller` first). Some antivirus tools flag unsigned one-file exes.
+Slot ceiling is automatic: 1000, or the `limit=` of the AToolSlotLimit mod when it is installed and enabled (`--ceiling N` overrides). `reserved.txt` (one slot or range per line, `#` comments; default 901-907) keeps slots out of `plan`.
+
 ## Use
 ```
 python slots.py scan [--game <...>\SB] [--no-cache]
