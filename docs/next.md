@@ -6,3 +6,5 @@
 
 5. Container-id clashes are the real 'clip unavailable' cause (scan reports them). `apply` could re-chunk OUR paks (new container id) but cannot fix third-party clashes; report them and tell the user which pak to disable.
 6. Slot 660 test pak loads and plays; slot 6666 (same scene, same pak name) does not, so something slot-number specific remains. Find the real threshold (build 1001 / 2000) before promising >1000 slots.
+
+7. fixids: apply it on the real install (ESAP, OldDroid) and confirm in game that slots 700-709 / 307-311 now appear in ATOOL's list (`anim3`); then PyInstaller exe, ceiling auto-detect (9999 when AToolSlotLimit is installed), reserved.txt.

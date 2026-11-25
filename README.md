@@ -9,10 +9,15 @@ Also reports IoStore container-ID clashes (u64 at TOC offset 56): when two paks 
 NOT built yet: `apply` / `revert` and the `.exe` packaging. Why: slot numbers are baked into IoStore pak asset paths, so moving a third-party
 clip needs a rewrite we have not proven safe. See `docs/next.md`.
 
+## fixids (2026-11-25, built, dry run verified on the real install, NOT yet applied in game)
+`python slots.py fixids` lists container-id clashes that stop an anim pak from mounting and the new unique id it would get; `--apply` writes it (game closed), `python slots.py revert` restores the last backup (`slot_backups/ids-*/manifest.json` keeps the old ids and byte offsets). Only anim paks are patched, never the other mod of a clash. Patches the id in all three places it lives (utoc header +56, the ContainerHeader chunk id in the TOC, first 8 bytes of that chunk in the .ucas); refuses when the three disagree or the chunk is compressed. Note: Vortex hard-links mod files (ESAP has 2 links), so the staged copy changes too; a Vortex re-deploy keeps the patch, a re-download of the mod restores the clash.
+
 ## Use
 ```
 python slots.py scan [--game <...>\SB] [--no-cache]
-python slots.py plan [--ceiling 1000]
+python slots.py plan [--ceiling 1000]       # 9999 when AToolSlotLimit is installed
+python slots.py fixids [--apply]
+python slots.py revert
 python tests/slots_test.py
 ```
 Exit code 1 when clashes exist. Cache: `slot_cache.json` (pak path, size, mtime -> slots); a corrupt cache is rebuilt.

@@ -18,4 +18,18 @@ import struct
 d2 = pathlib.Path(tempfile.mkdtemp())
 for n, cid in (("a.utoc", 7), ("b.utoc", 7), ("c.utoc", 9)): (d2 / n).write_bytes(b"-==--==--==--==-" + bytes(40) + struct.pack("<Q", cid))
 assert S.id_clashes(d2) == {7: ["a.utoc", "b.utoc"]}                              # same container id -> clash
+# fix container-id clashes on synthetic containers (utoc header + chunk id + ucas head all carry the id)
+def mk(d, name, cid):
+    h = bytearray(144); h[:16] = b"-==--==--==--==-"; h[16] = 2
+    struct.pack_into("<IIIIIII", h, 20, 144, 1, 1, 12, 0, 32, 65536); struct.pack_into("<Q", h, 56, cid)
+    body = struct.pack("<QHBB", cid, 0, 0, 10) + (0).to_bytes(5, "big") + (16).to_bytes(5, "big") + (0).to_bytes(5, "little") + (16).to_bytes(3, "little") * 2 + bytes([0])
+    (d / (name + ".utoc")).write_bytes(bytes(h) + body); (d / (name + ".ucas")).write_bytes(struct.pack("<Q", cid) + bytes(8))
+d3 = pathlib.Path(tempfile.mkdtemp()); mk(d3, "a", 5); mk(d3, "b", 5); mk(d3, "other", 5)
+inv = {"a.utoc": [10], "b.utoc": [11]}                        # a, b ship anim slots; "other" does not
+fx = S.plan_fix(d3, inv); assert sorted(k for k, _, _ in fx) == ["a.utoc", "b.utoc"], fx   # other (non-anim) is never touched
+assert len({n for _, _, n in fx}) == 2 and 5 not in {n for _, _, n in fx}
+done, skipped = S.apply_fix(d3, fx, d3 / "bk"); assert len(done) == 2 and not skipped
+ids = S.container_ids(d3); assert ids["other.utoc"] == 5 and len({ids["a.utoc"], ids["b.utoc"], 5}) == 3 and not S.id_clashes(d3)
+assert S.revert_fix(d3 / "bk") == 2 and S.container_ids(d3) == {"a.utoc": 5, "b.utoc": 5, "other.utoc": 5}   # byte-exact round trip
+assert S.revert_fix(d3 / "bk") == 0                                                  # reverting twice changes nothing
 print("ok")
