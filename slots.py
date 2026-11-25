@@ -1,5 +1,5 @@
 """Scan installed Stellar Blade anim paks for ATOOL slot use. Stdlib only."""
-import struct, re, pathlib, collections, sys
+import struct, re, pathlib, collections, sys, os
 
 SLOT_RE = re.compile(r"/Game/Mods/HD-ATOOL_P/anim/(\d+)(?:a)?[/.]", re.I)
 
@@ -224,18 +224,155 @@ def revert_fix(backup):
         n += 1
     return n
 
+# ---- move a pak's clip to another slot (rewrites the IoStore container, see iostore.py)
+def _lock_ok(p):
+    try:
+        with open(p, "r+b"): return True
+    except OSError: return False
+
+def try_rename(root, key, old, new):
+    """dry run on an in-memory copy -> (container, None) or (None, reason)"""
+    import iostore
+    try:
+        c = iostore.read_container(pathlib.Path(root) / key)
+        if old not in iostore.slots_in(c): return None, "slot %d is not a clip package of this pak" % old
+        iostore.rename_slot(c, old, new)
+        bad = iostore.check_container(c)
+        if bad: return None, "consistency check failed: " + bad[0]
+        return c, None
+    except iostore.Unsupported as e: return None, str(e)
+    except (OSError, struct.error, IndexError, ValueError) as e: return None, "unreadable: %s" % e
+
+def free_slot(old, used, ceiling, reserved):
+    """nearest free slot above `old`, then below, within 1..ceiling"""
+    for d in range(1, ceiling + 1):
+        for s in (old + d, old - d):
+            if 1 <= s <= ceiling and s not in used and s not in reserved: return s
+    return None
+
+def plan_moves(root, inv, ceiling=1000, reserved=(), mtimes=None):
+    """-> (moves [(pak, old, new)], unresolved [(slot, paks, reasons)]). Per clash: never LogicMods; try the newer pak first, then the other; first one whose rewrite verifies wins."""
+    used = {s for v in inv.values() for s in v} | set(reserved); moves = []; unresolved = []
+    mt = mtimes or {k: (pathlib.Path(root) / k).stat().st_mtime for k in inv}
+    for slot, paks in sorted(clashes(inv).items()):
+        cand = sorted([k for k in paks if not k.startswith("LogicMods/")], key=lambda k: -mt.get(k, 0)); reasons = []; remaining = list(paks)
+        for k in cand:                                   # newest first; the last holder left keeps the slot
+            if len(remaining) == 1: break
+            new = free_slot(slot, used, ceiling, reserved)
+            if new is None: reasons.append("%s: no free slot <= %d" % (k, ceiling)); continue
+            c, why = try_rename(root, k, slot, new)
+            if c is None: reasons.append("%s: %s" % (k, why)); continue
+            moves.append((k, slot, new)); used.add(new); remaining.remove(k)
+        if len(remaining) > 1: unresolved.append((slot, remaining, reasons or ["only LogicMods packs involved"]))
+    return moves, unresolved
+
+def external_files(game, old, new, apply_to=None, backup=None, rewrite=True):
+    """slot-keyed files outside the pak. Returns a list of (what, path); with backup set, edits them (originals saved)."""
+    import json, shutil
+    game = pathlib.Path(game); out = []
+    def save(p):
+        d = pathlib.Path(backup) / "files" / ("%d" % len(out)); d.mkdir(parents=True, exist_ok=True); shutil.copy2(p, d / p.name); return d / p.name
+    audio = game / "Content" / "Paks" / "LogicMods" / "HD-ATOOL_P" / "audio"
+    for p in (audio.glob("%d.*" % old) if audio.is_dir() else []):
+        if p.suffix.lower() == ".wav" and p.stem == str(old):
+            dst = p.with_name("%d%s" % (new, p.suffix))
+            if not rewrite: out.append(("note: %s kept (slot %d is still used by another pack)" % (p.name, old), p)); continue
+            if dst.exists(): out.append(("wav not renamed: %s exists" % dst.name, p)); continue
+            out.append(("wav %s -> %s" % (p.name, dst.name), p))
+            if backup: p.rename(dst); apply_to is not None and apply_to.append({"kind": "rename", "from": str(p), "to": str(dst)})
+    pefa = game / "Binaries" / "Win64" / "ue4ss" / "Mods" / "PEFA"
+    names = pefa / "names.txt"
+    if names.is_file():
+        txt = names.read_text(encoding="utf-8", errors="replace")
+        if re.search(r"(?m)^%d\s*=" % old, txt) and not rewrite: out.append(("note: PEFA names.txt line %d kept (slot still used by another pack)" % old, names))
+        elif re.search(r"(?m)^%d\s*=" % old, txt):
+            out.append(("PEFA names.txt line %d -> %d" % (old, new), names))
+            if backup:
+                b = save(names); apply_to.append({"kind": "file", "path": str(names), "backup": str(b)})
+                names.write_text(re.sub(r"(?m)^%d(\s*=)" % old, lambda m: str(new) + m.group(1), txt), encoding="utf-8", newline="")
+    for nm in ("packs_rows.txt", "packs_cache.txt"):
+        p = pefa / nm
+        if p.is_file():
+            out.append(("PEFA cache %s deleted (PEFA rebuilds it)" % nm, p))
+            if backup: b = save(p); apply_to.append({"kind": "file", "path": str(p), "backup": str(b)}); p.unlink()
+    pela = game / "Content" / "Paks" / "~mods" / "PELA Patches"
+    for p in sorted(pela.glob("*.json")) if pela.is_dir() else []:
+        try: doc = json.loads(p.read_text(encoding="utf-8"))
+        except ValueError: continue
+        hit = [0]
+        def walk(o):
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    if k == "clip" and v == old: o[k] = new; hit[0] += 1
+                    elif k == "singles" and isinstance(v, list):
+                        for i, x in enumerate(v):
+                            if x == old: v[i] = new; hit[0] += 1
+                    else: walk(v)
+            elif isinstance(o, list):
+                for x in o: walk(x)
+        walk(doc)
+        if hit[0] and not rewrite: out.append(("note: PELA %s keeps %d reference(s) to slot %d (still used by another pack)" % (p.name, hit[0], old), p))
+        elif hit[0]:
+            out.append(("PELA %s: %d reference(s)" % (p.name, hit[0]), p))
+            if backup:
+                b = save(p); apply_to.append({"kind": "file", "path": str(p), "backup": str(b)})
+                p.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    return out
+
+def apply_move(root, game, key, old, new, backup, rewrite=True):
+    """rewrite the container of `key` (slot old -> new), swap it in, edit slot-keyed files; journal first. Returns the journal dict."""
+    import iostore, json, os
+    root = pathlib.Path(root); backup = pathlib.Path(backup); backup.mkdir(parents=True, exist_ok=True)
+    c, why = try_rename(root, key, old, new)
+    if c is None: raise SystemExit("cannot move %s: %s" % (key, why))
+    utoc = root / key; ucas = pathlib.Path(str(utoc)[:-5] + ".ucas")
+    for p in (utoc, ucas):
+        if not _lock_ok(p): raise SystemExit("%s is locked (game running?)" % p.name)
+    t, u = iostore.container_bytes(c)
+    nt = utoc.with_name(utoc.stem + ".new.utoc"); nu = utoc.with_name(utoc.stem + ".new.ucas")
+    nt.write_bytes(t); nu.write_bytes(u)
+    c2 = iostore.read_container(nt)                                     # verify what was written, not what we meant to write
+    if iostore.check_container(c2) or new not in iostore.slots_in(c2) or old in iostore.slots_in(c2):
+        nt.unlink(); nu.unlink(); raise SystemExit("verification of the rewritten container failed, nothing changed")
+    j = {"kind": "move", "pak": key, "old": old, "new": new, "steps": []}
+    (backup / "manifest.json").write_text(json.dumps(j, indent=1))      # journal before the first replacement
+    bt = backup / utoc.name; bu = backup / ucas.name
+    os.replace(utoc, bt); os.replace(ucas, bu)                          # originals moved aside (same volume: no copy; a hard link to Vortex staging stays intact)
+    os.replace(nt, utoc); os.replace(nu, ucas)
+    j["steps"] += [{"kind": "swap", "path": str(utoc), "backup": str(bt)}, {"kind": "swap", "path": str(ucas), "backup": str(bu)}]
+    external_files(game, old, new, j["steps"], backup, rewrite)
+    (backup / "manifest.json").write_text(json.dumps(j, indent=1))
+    return j
+
+def revert_move(backup):
+    """undo a move journal: put the original files back, newest step first. Returns the number of steps undone."""
+    import json, os, shutil
+    j = json.loads((pathlib.Path(backup) / "manifest.json").read_text()); n = 0
+    for st in reversed(j["steps"]):
+        if st["kind"] == "swap": os.replace(st["backup"], st["path"]); n += 1
+        elif st["kind"] == "rename":
+            if pathlib.Path(st["to"]).exists() and not pathlib.Path(st["from"]).exists(): os.replace(st["to"], st["from"]); n += 1
+        elif st["kind"] == "file": shutil.copy2(st["backup"], st["path"]); n += 1
+    return n
+
 def main(argv):
     import argparse, time
     ap = argparse.ArgumentParser(prog="slots", description="Stellar Blade anim slot organizer (scan/plan only so far)")
-    ap.add_argument("cmd", choices=["scan", "plan", "fixids", "revert"]); ap.add_argument("--game"); ap.add_argument("--ceiling", type=int, default=None, help="default: auto (1000, or the AToolSlotLimit limit)"); ap.add_argument("--reserved", default="reserved.txt")
-    ap.add_argument("--apply", action="store_true", help="fixids: really write (default: dry run)"); ap.add_argument("--backup", default="slot_backups"); ap.add_argument("--cache", default="slot_cache.json"); ap.add_argument("--no-cache", action="store_true")
+    ap.add_argument("cmd", choices=["scan", "plan", "fixids", "moveslots", "revert"]); ap.add_argument("--game"); ap.add_argument("--ceiling", type=int, default=None, help="default: auto (1000, or the AToolSlotLimit limit)"); ap.add_argument("--reserved", default="reserved.txt")
+    ap.add_argument("--apply", action="store_true", help="fixids/moveslots: really write (default: dry run)"); ap.add_argument("--pak", help="moveslots: move this pak (path relative to Paks, e.g. ~mods/BBS_P.utoc)"); ap.add_argument("--slot", type=int, help="moveslots --pak: the slot to move"); ap.add_argument("--to", type=int, help="moveslots --pak: the target slot"); ap.add_argument("--backup", default="slot_backups"); ap.add_argument("--cache", default="slot_cache.json"); ap.add_argument("--no-cache", action="store_true")
     a = ap.parse_args(argv); g = find_game(a.game)
     if not g: print("Stellar Blade not found; pass --game <...>\SB or set SB_GAME"); return 2
     if a.cmd == "revert":
         import glob
-        dirs = sorted(glob.glob(a.backup + "/ids-*"))
+        dirs = sorted(glob.glob(a.backup + "/ids-*") + glob.glob(a.backup + "/move-*"), key=lambda d: os.path.getmtime(d + "/manifest.json"))
         if not dirs: print("no backup in", a.backup); return 2
-        print("restored %d container id(s) from %s" % (revert_fix(dirs[-1]), dirs[-1])); return 0
+        d = dirs[-1]
+        if "/move-" in d.replace(chr(92), "/"):
+            run = d.rsplit("-", 1)[0]                      # all moves of the same run, newest first
+            tot = sum(revert_move(x) for x in sorted(glob.glob(run + "-*"), reverse=True))
+            print("undid %d step(s) of the slot move(s) %s-*" % (tot, run))
+        else: print("restored %d container id(s) from %s" % (revert_fix(d), d))
+        return 0
     if a.ceiling is None: a.ceiling = detect_ceiling(g)
     t = time.time(); inv = scan(g / "Content" / "Paks", None if a.no_cache else a.cache)
     ss = {s for v in inv.values() for s in v}; cl = clashes(inv)
@@ -257,6 +394,26 @@ def main(argv):
         done, skipped = apply_fix(g / "Content" / "Paks", fx, bk)
         for k, why in skipped: print("  skipped %s: %s" % (k, why))
         print("changed %d container id(s); undo with: python slots.py revert (backup %s)" % (len(done), bk)); return 0
+    if a.cmd == "moveslots":
+        import subprocess, time as _t
+        paks = g / "Content" / "Paks"; rs = load_reserved(a.reserved)
+        if a.pak:
+            if a.slot is None or a.to is None: print("--pak needs --slot and --to"); return 2
+            moves, unresolved = [(a.pak, a.slot, a.to)], []
+        else: moves, unresolved = plan_moves(paks, inv, a.ceiling, rs)
+        for slot, ps, why in unresolved:
+            print("  slot %d cannot be fixed automatically (%s):" % (slot, " | ".join(ps)))
+            for w in why: print("      " + w)
+        def owned_alone(k, o): return not any(o in v for kk, v in inv.items() if kk != k)
+        for k, o, n in moves:
+            print("  %s: slot %d -> %d" % (k, o, n))
+            for what, _p in external_files(g, o, n, rewrite=owned_alone(k, o)): print("      " + what)
+        if not moves: print("nothing to move"); return 1 if unresolved else 0
+        if not a.apply: print("dry run: %d move(s) (add --apply, close the game first)" % len(moves)); return 1
+        if "SB-Win64-Shipping.exe" in subprocess.run(["tasklist"], capture_output=True, text=True).stdout: print("Stellar Blade is running: close it first"); return 2
+        bk = "%s/move-%s" % (a.backup, _t.strftime("%Y%m%d-%H%M%S"))
+        for i, (k, o, n_) in enumerate(moves): apply_move(paks, g, k, o, n_, "%s-%d" % (bk, i), rewrite=owned_alone(k, o))
+        print("moved %d slot(s); undo with: python slots.py revert (backup %s-*)" % (len(moves), bk)); return 0
     if a.cmd == "plan":
         mv = plan(inv, a.ceiling, reserved=load_reserved(a.reserved))
         for k, o, n in mv: print("  %s: %d -> %d" % (k, o, n))
