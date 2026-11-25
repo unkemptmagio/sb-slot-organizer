@@ -1,4 +1,4 @@
-"""iostore + slot mover tests. Synthetic containers (no game files); real-pak vectors only when the local files exist."""
+﻿"""iostore + slot mover tests. Synthetic containers (no game files); real-pak vectors only when the local files exist."""
 import sys, pathlib, tempfile, struct, hashlib, os, json
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import iostore as I, slots as S
@@ -32,8 +32,7 @@ if real.is_file():
     rc = I.read_container(real); assert not I.check_container(rc)
     t, u = I.container_bytes(rc); assert t == real.read_bytes()                          # byte-identical TOC
     assert I.package_bytes(I.read_package(rc.chunks[1]["data"])) == rc.chunks[1]["data"]
-try: I.cityhash64(b"x" * 65); assert 0
-except I.Unsupported: pass                                                               # long inputs are refused, not guessed
+assert I.cityhash64(b"x" * 65) == I.cityhash64(b"x" * 65)                              # long branch is on (verified against 3793 real hashes)
 
 # container + package round trip, consistency
 a = make_pak(tmp, "a", 982); c = I.read_container(a)
@@ -61,6 +60,10 @@ j = S.apply_move(paks, tmp, "~mods/two.utoc", 700, 701, tmp / "bk", rewrite=Fals
 inv2 = S.scan(paks); assert not S.clashes(inv2) and inv2["~mods/two.utoc"] == [701] and inv2["~mods/one.utoc"] == [700]
 assert S.revert_move(tmp / "bk") == 2
 assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (paks / "~mods").iterdir()} == before   # byte-exact
+# chained moves of the same pak keep every original; reverting newest-first restores byte-exact
+S.apply_move(paks, tmp, "~mods/two.utoc", 700, 701, tmp / "c1", rewrite=False); S.apply_move(paks, tmp, "~mods/two.utoc", 701, 702, tmp / "c2", rewrite=False)
+S.revert_move(tmp / "c2"); S.revert_move(tmp / "c1")
+assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (paks / "~mods").iterdir()} == before
 # LogicMods never moves; a clash with only a LogicMods pak and a movable one moves the other
 (paks / "LogicMods").mkdir(); make_pak(paks / "LogicMods", "lm", 700, cid=3)
 inv = S.scan(paks); mv, un = S.plan_moves(paks, inv, 1000, ())

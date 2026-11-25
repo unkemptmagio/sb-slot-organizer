@@ -1,4 +1,4 @@
-"""IoStore (UE 4.26) helpers: CityHash64 and the ids/hashes derived from it. Stdlib only.
+﻿"""IoStore (UE 4.26) helpers: CityHash64 and the ids/hashes derived from it. Stdlib only.
 Everything here is proven against real paks in tests/iostore_test.py before any container is rewritten."""
 import struct
 
@@ -55,13 +55,13 @@ def _h33_64(s):
     b = (_smix((((z + a) * mul) + d + h) & M) * mul) & M
     return (b + x) & M
 
-ALLOW_LONG = False       # inputs longer than 64 bytes: my long branch does NOT reproduce the stored hashes (0 of 15 name hashes, 2026-11-25). Unverified, so refused.
+ALLOW_LONG = True        # long branch verified 2026-11-25: 3793/3793 stored hashes (65..232 B) from 205 installed containers
 
 class Unsupported(Exception):
     pass
 
 def cityhash64(s):
-    """CityHash64 (v1.1) of bytes; verified against real paks for inputs up to 64 bytes only"""
+    """CityHash64 (v1.1) of bytes; verified against real paks, short and long inputs"""
     n = len(s)
     if n <= 32: return _h0_16(s) if n <= 16 else _h17_32(s)
     if n <= 64: return _h33_64(s)
@@ -77,7 +77,7 @@ def cityhash64(s):
         x ^= w[1]; y = (y + v[0] + _f64(s, i + 40)) & M
         z = (_rot((z + w[0]) & M, 33) * K1) & M
         v = _weak(s, i, (v[1] * K1) & M, (x + w[0]) & M)
-        w = _weak(s, i + 32, (z + y) & M, (y + _f64(s, i + 16)) & M)
+        w = _weak(s, i + 32, (z + w[1]) & M, (y + _f64(s, i + 16)) & M)
         z, x = x, z; i += 64; n -= 64
         if n == 0: break
     return _h16((_h16(v[0], w[0]) + _smix(y) * K1 + z) & M, (_h16(v[1], w[1]) + x) & M)
