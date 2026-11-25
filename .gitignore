@@ -3,3 +3,6 @@ slot_cache.json
 dist/
 build/
 *.exe
+work_atool/
+slot_backups/
+work/
