@@ -14,4 +14,8 @@ assert S.clashes({"a": [1], "b": [1, 2]}) == {1: ["a", "b"]}
 d = pathlib.Path(tempfile.mkdtemp()); (d / "x.pak").write_bytes(b"junk"); c = d / "c.json"; c.write_text("{not json")
 assert S.scan(d, c) == {} and S.scan.hits == 0                                   # corrupt cache rebuilt
 S.scan(d, c); assert S.scan.hits == 1                                            # unchanged pak: cache hit
+import struct
+d2 = pathlib.Path(tempfile.mkdtemp())
+for n, cid in (("a.utoc", 7), ("b.utoc", 7), ("c.utoc", 9)): (d2 / n).write_bytes(b"-==--==--==--==-" + bytes(40) + struct.pack("<Q", cid))
+assert S.id_clashes(d2) == {7: ["a.utoc", "b.utoc"]}                              # same container id -> clash
 print("ok")

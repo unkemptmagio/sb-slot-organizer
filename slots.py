@@ -96,6 +96,19 @@ def scan(root, cache_file=None):
     scan.hits = hits
     return inv
 
+def container_ids(root):
+    """{utoc path rel to root: IoStore container id}: u64 at offset 56 of the TOC header. Two containers with the same id: only one mounts."""
+    out = {}
+    for p in sorted(pathlib.Path(root).rglob("*.utoc")):
+        with open(p, "rb") as f: h = f.read(64)
+        if len(h) == 64 and h[:16] == b"-==--==--==--==-": out[str(p.relative_to(root)).replace("\\", "/")] = struct.unpack_from("<Q", h, 56)[0]
+    return out
+
+def id_clashes(root):
+    by = collections.defaultdict(list)
+    for k, v in container_ids(root).items(): by[v].append(k)
+    return {v: ks for v, ks in by.items() if len(ks) > 1}
+
 def clashes(inv):
     by = collections.defaultdict(list)
     for k, v in inv.items():
@@ -127,6 +140,11 @@ def main(argv):
     ss = {s for v in inv.values() for s in v}; cl = clashes(inv)
     print("%d paks, %d slots, %d clashes, %d above %d, %d free <= %d  (%d cached, %.2fs)" % (len(inv), len(ss), len(cl), sum(s > a.ceiling for s in ss), a.ceiling, a.ceiling - len([s for s in ss if s <= a.ceiling]), a.ceiling, scan.hits, time.time() - t))
     for s, p in sorted(cl.items()): print("  clash slot %d: %s" % (s, " | ".join(p)))
+    idc = id_clashes(g / "Content" / "Paks"); anim = {k.replace("\\", "/") for k in inv}
+    hit = {v: ks for v, ks in idc.items() if any(k in anim for k in ks)}
+    print("%d container-id clashes (%d involve anim paks: only one pak per id mounts, the other one's clips are unavailable)" % (len(idc), len(hit)))
+    for v, ks in hit.items(): print("  id %#x: %s" % (v, " | ".join(ks)))
+    cl = {**cl, **{("id", v): ks for v, ks in hit.items()}}
     if a.cmd == "plan":
         mv = plan(inv, a.ceiling)
         for k, o, n in mv: print("  %s: %d -> %d" % (k, o, n))
