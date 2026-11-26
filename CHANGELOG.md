@@ -75,3 +75,8 @@
 
 ## tools/make_test_clip.py
 - Makes a test copy of an anim pak at another slot (digit count may change) with a fresh container id; source only read. Used by the Chrisr0 in-game test plan.
+
+## 1.0.0 - review of the Chrisr0 build
+- install-atool-limit: an unknown UE4SS is refused (no more silent RevOG fallback); -InstallUnverified is required and the text says it may crash the game; -Force only skips the untested-Chrisr0 question. Wording fixed everywhere: a DLL on the wrong UE4SS may fail to load or crash (the names can resolve while the function table differs). Never mix builds.
+- release.ps1 asserts the RevOG DLL imports on_cpp_mods_loaded and the Chrisr0 DLL does not, so a stale or swapped DLL cannot ship; the Chrisr0 build script deletes stale outputs first.
+- Test: the installer's hash table must equal KNOWN_UE4SS + UNTESTED_UE4SS. NOTICE names the UE4SS copyright and the Chrisr0 fork. 'would NOT show up' is now 'may not show up'.

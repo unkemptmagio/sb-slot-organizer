@@ -12,6 +12,12 @@ if (-not (Test-Path -LiteralPath $dll)) { throw "AToolSlotLimit main.dll not fou
 # smoke test the built exe: a read-only scan of the real install with its data folder redirected to a scratch location
 $oldLocal = $env:LOCALAPPDATA; $env:LOCALAPPDATA = Join-Path $env:TEMP "so_release_smoke"
 try { & .\dist\SlotOrganizer.exe scan --game $Game | Out-Null; if ($LASTEXITCODE -ge 2) { throw "built exe failed a scan (exit $LASTEXITCODE)" } } finally { $env:LOCALAPPDATA = $oldLocal }
+# each packaged DLL must be built for its UE4SS line: the RevOG-line DLL imports CppUserModBase::on_cpp_mods_loaded, the Chrisr0-line one must not
+$dumpbin = Get-ChildItem "C:\Program Files*\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -Last 1 -ExpandProperty FullName
+if (-not $dumpbin) { throw "dumpbin not found (Visual Studio C++ build tools)" }
+if (-not (Test-Path -LiteralPath $Chrisr0Dll)) { throw "Chrisr0 build not found at $Chrisr0Dll (run build-chrisr0.ps1 in sb-atool-slot-limit)" }
+if (-not ((& $dumpbin /nologo /imports $dll) -match "on_cpp_mods_loaded")) { throw "the RevOG DLL does not import on_cpp_mods_loaded: wrong file at $dll" }
+if ((& $dumpbin /nologo /imports $Chrisr0Dll) -match "on_cpp_mods_loaded") { throw "the Chrisr0 DLL imports on_cpp_mods_loaded: it was built for the wrong UE4SS line" }
 $stage = "release\SlotOrganizer-$ver"; $zip = "release\SlotOrganizer-$ver.zip"
 Remove-Item -Recurse -Force $stage, $zip -ErrorAction SilentlyContinue
 foreach ($b in "revog-1.3", "chrisr0-3.1.0") { New-Item -ItemType Directory -Force "$stage\AToolSlotLimit\builds\$b" | Out-Null }

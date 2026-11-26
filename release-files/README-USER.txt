@@ -52,11 +52,9 @@ a native mod only works with the UE4SS it was built for, so the package carries 
   * revog-1.3       for RevOG SB-UE4SS 1.3 (Nexus; UE4SS.dll SHA-256 E0CC51CE...DABE, UE4SS.log
                     "v3.0.1 Beta ... Git SHA #08a0733"). Tested in game.
   * chrisr0-3.1.0   for Chrisr0/RE-UE4SS 3.1.0-4, 3.1.0-5 and 3.1.0-6 (the line PEFA's readme lists;
-                    SB-UE4SS 3.1.6 is the very same file as 3.1.0-6). Built against that source and
-                    every function it needs resolves in those three UE4SS.dll files (checked with
-                    dumpbin), but it has NOT been tested in game yet.
+                    SB-UE4SS 3.1.6 is the very same file as 3.1.0-6). Built against that tree's headers; every function it needs resolves in those three UE4SS.dll files (checked with dumpbin), but it has NOT been tested in game yet. The 3.1.0-4 zip ships a different default (bUseUObjectArrayCache = true), so it is the riskiest of the three.
 install-atool-limit.bat looks at your UE4SS.dll and installs the matching build. On the Chrisr0 line
-it tells you it is untested and asks first; on any other UE4SS it warns and asks.
+it tells you it is untested and asks first; on any other UE4SS it refuses (-InstallUnverified overrides, and may crash the game). Never copy one build's main.dll into a different UE4SS by hand: the names would still resolve but the function tables differ.
   * SlotOrganizer only uses slots above 1000 when the mod is installed, enabled AND your UE4SS is a
     build verified in game; until the Chrisr0 build is, it keeps everything within 1..1000 and
     tells you. If you force a higher --ceiling it warns that those clips would not show up in game.

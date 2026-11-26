@@ -1,6 +1,7 @@
 ﻿# Installs the optional AToolSlotLimit UE4SS mod (lifts ATOOL's 1000-slot limit), choosing the DLL that matches your UE4SS build.
+# -Force skips the untested-Chrisr0 question; -InstallUnverified is required to install on an unknown UE4SS (it can crash the game).
 # Usage: install-atool-limit.bat   (or: powershell -ExecutionPolicy Bypass -File install-atool-limit.ps1 -Game "D:\Games\StellarBlade")
-param([string]$Game, [switch]$Force)
+param([string]$Game, [switch]$Force, [switch]$InstallUnverified)
 $ErrorActionPreference = "Stop"
 try {
     if (-not $Game) { $Game = Read-Host "Path to the StellarBlade folder (the one that contains SB)" }
@@ -21,8 +22,8 @@ try {
     $build = $builds[$have]
     if (-not $build) {
         Write-Host "Your UE4SS is not a build this mod was made for (RevOG SB-UE4SS 1.3, Chrisr0 RE-UE4SS 3.1.0-4/5/6)."
-        Write-Host "The mod is not expected to load on it (UE4SS should skip it, but this was not tested in game); slots above 1000 will not work and SlotOrganizer keeps everything within 1..1000."
-        if (-not $Force) { $ans = "" + (Read-Host "Install the RevOG build anyway? [y/N]"); if ($ans.Trim() -notmatch '^(y|yes)$') { throw "cancelled (UE4SS build not supported)" } }
+        Write-Host "A mod DLL built for another UE4SS may fail to load or crash the game at launch (its function table can differ even when the names resolve). Slots above 1000 will not work and SlotOrganizer keeps everything within 1..1000."
+        if (-not $InstallUnverified) { throw "refused: unsupported UE4SS build (-InstallUnverified installs the RevOG build anyway, at your own risk)" }
         $build = "revog-1.3"
     } elseif ($build -ne "revog-1.3" -and -not $Force) {
         Write-Host "Your UE4SS is a Chrisr0 / SB-UE4SS 3.1.x build. The mod was built against that source and every symbol it needs resolves,"
