@@ -85,3 +85,6 @@
 - A clip re-slotted 982 -> 1001 played, but Adam was missing: PEFA read 1 row in the 1001 partner table instead of 2. Cause: the slot string inside the DataTable rows grew by one character, but the enclosing StrProperty tag Size did not, so the engine lost its place and dropped the second (Adam) row. Same-digit moves never change string lengths, which is why moveslots (which refuses digit changes) was not affected.
 - iostore._fix_strings now patches the StrProperty tag Size when a string changes length and raises Unsupported if it cannot find that tag (never writes a stale Size). Tests: tagged-row walk, untagged refusal, same-digit layout unchanged.
 - try_rename still refuses digit-count changes until a corrected 1001 clip is verified in game (Adam visible).
+
+## Digit-count re-slot verified once in game (2026-11-25)
+- A 982 -> 1001 re-slot of a clip with partner tables (Adam + genital mesh) plays with both partners after the string-size fix (Run A2). try_rename still refuses digit-count changes; lifting that is a separate decision (one clip verified).
