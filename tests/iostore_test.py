@@ -116,4 +116,20 @@ assert S.revert_move(tmp / "ok1") >= 2 and {q.name: hashlib.sha256(q.read_bytes(
 assert not any(".new" in q.name for q in (paks2 / "~mods").iterdir())
 # digit-count change is refused for moves
 assert S.try_rename(paks2, "~mods/p.utoc", 500, 1001)[0] is None
+# second review: digit-aware free slot, ledger robustness/staleness, guarded revert, lossless names.txt
+assert S.free_slot(99, {98 - 98}, 9999, set()) == 98 and S.free_slot(9, set(), 9999, {8}) == 7 and S.free_slot(999, {998}, 9999, set()) == 997
+(tmp / "bad.json").write_text("[]"); assert S.ledger_update(g, {"~mods/a.utoc": [820]}, tmp / "bad.json")      # garbage ledger: no crash
+(au / "830.wav").write_bytes(b"D"); (tmp / "o2.json").unlink() if (tmp / "o2.json").exists() else None
+l1 = S.ledger_update(g, {"~mods/a.utoc": [830]}, tmp / "o2.json"); assert l1[nc(str(au / "830.wav"))] == "pak:~mods/a.utoc"
+(au / "830.wav").write_bytes(b"changed by another mod!")                                            # file replaced: entry dropped, re-recorded for the current single holder
+l2 = S.ledger_update(g, {"~mods/b.utoc": [830]}, tmp / "o2.json"); assert l2[nc(str(au / "830.wav"))] == "pak:~mods/b.utoc"
+(g / "Binaries/Win64/ue4ss/Mods/PEFA/names.txt").write_bytes(b"840 = Caf\xe9\r\n841 = X\r\n")          # CRLF + non-UTF-8 byte survive
+(au / "840.wav").write_bytes(b"E"); stn = []
+S.external_files(g, 840, 842, stn, tmp / "fn", shared=True, mover=None, srcs={})
+assert (g / "Binaries/Win64/ue4ss/Mods/PEFA/names.txt").read_bytes() == b"840 = Caf\xe9\r\n842 = Caf\xe9\r\n841 = X\r\n", (g / "Binaries/Win64/ue4ss/Mods/PEFA/names.txt").read_bytes()
+# revert refuses to overwrite a file that changed after the move
+paks3 = tmp / "Paks3"; (paks3 / "~mods").mkdir(parents=True); make_pak(paks3 / "~mods", "q", 600, cid=11)
+S.apply_move(paks3, g, "~mods/q.utoc", 600, 601, tmp / "g1", shared=False)
+(paks3 / "~mods" / "q.utoc").write_bytes(b"NEWER VERSION FROM THE MOD AUTHOR")
+S.revert_move(tmp / "g1"); assert (paks3 / "~mods" / "q.utoc").read_bytes() == b"NEWER VERSION FROM THE MOD AUTHOR" and (tmp / "g1" / "manifest.partial.json").exists()
 print("ok")

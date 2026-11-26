@@ -58,9 +58,10 @@ def pak_slots(path):
 def find_game(arg=None):
     """game's SB folder: --game, $SB_GAME, then Steam libraries. ponytail: no Epic/GOG detection"""
     import os, json
-    if arg: return pathlib.Path(arg) if (pathlib.Path(arg) / "Content" / "Paks").is_dir() else None     # an explicit --game never falls back to another install
+    if arg: return pathlib.Path(arg).resolve() if (pathlib.Path(arg) / "Content" / "Paks").is_dir() else None     # an explicit --game never falls back to another install
     for c in [os.environ.get("SB_GAME")]:
-        if c and (pathlib.Path(c) / "Content" / "Paks").is_dir(): return pathlib.Path(c)
+        if c and (pathlib.Path(c) / "Content" / "Paks").is_dir(): return pathlib.Path(c).resolve()
+        if c: print("warning: SB_GAME=%s is not a Stellar Blade SB folder, ignored" % c)
     roots = []
     try:
         import winreg
@@ -200,14 +201,15 @@ def plan_fix(root, inv):
 def apply_fix(root, fixes, backup):
     """patch the three sites; keep the old bytes in backup/manifest.json. Returns (done, skipped[(pak, why)]). Rolls back on any error."""
     import json
-    root = pathlib.Path(root); backup = pathlib.Path(backup); backup.mkdir(parents=True, exist_ok=True)
+    root = pathlib.Path(root); backup = pathlib.Path(backup)
     man, skipped = [], []
     for k, old, new in fixes:
         sites = id_sites(root / k)
         if not sites or sites["id"] != old: skipped.append((k, "id sites differ or chunk is compressed")); continue
         if not (_lock_ok(sites["utoc"]) and _lock_ok(sites["ucas"])): skipped.append((k, "locked (game running?)")); continue
         man.append({"pak": k, "old": old, "new": new, **{x: sites[x] for x in ("utoc", "ucas", "toc_chunk_off", "ucas_off")}})
-    _save_manifest(backup / "manifest.json", man)
+    if not man: return man, skipped                          # nothing patched: no journal, no empty "newest run"
+    backup.mkdir(parents=True, exist_ok=True); _save_manifest(backup / "manifest.json", man)
     try:
         for m in man:
             with open(m["utoc"], "r+b") as f:
@@ -215,7 +217,7 @@ def apply_fix(root, fixes, backup):
             with open(m["ucas"], "r+b") as f: f.seek(m["ucas_off"]); f.write(struct.pack("<Q", m["new"]))
             s2 = id_sites(m["utoc"])
             if not s2 or s2["id"] != m["new"]: raise OSError("verify failed for %s" % m["pak"])
-    except OSError as e:
+    except (OSError, struct.error) as e:
         revert_fix(backup); raise SystemExit("container id patch failed (%s); everything written so far was rolled back" % e)
     return man, skipped
 
@@ -243,6 +245,14 @@ def _save_manifest(path, j):
     with open(t, "w", encoding="utf-8") as f: json.dump(j, f, indent=1); f.flush(); os.fsync(f.fileno())
     os.replace(t, path)
 
+def _sig(p):
+    try: st = os.stat(p); return [st.st_size, st.st_mtime_ns]
+    except OSError: return None
+
+def _commit(steps):
+    """flush the journal after a step dict was updated in place (no-op for a plain list)"""
+    if hasattr(steps, "path"): steps.j["steps"] = list(steps); _save_manifest(steps.path, steps.j)
+
 class _Steps(list):
     """journal steps: every append is flushed to the manifest immediately"""
     def __init__(self, j, path): super().__init__(); self.j, self.path = j, path
@@ -268,10 +278,10 @@ def try_rename(root, key, old, new):
     except (OSError, struct.error, IndexError, ValueError) as e: return None, "unreadable: %s" % e
 
 def free_slot(old, used, ceiling, reserved):
-    """nearest free slot above `old`, then below, within 1..ceiling"""
+    """nearest free slot above `old`, then below, within 1..ceiling, with the same digit count (other lengths are not verified in game)"""
     for d in range(1, ceiling + 1):
         for s in (old + d, old - d):
-            if 1 <= s <= ceiling and s not in used and s not in reserved: return s
+            if 1 <= s <= ceiling and len(str(s)) == len(str(old)) and s not in used and s not in reserved: return s
     return None
 
 def plan_moves(root, inv, ceiling=1000, reserved=(), mtimes=None):
@@ -325,29 +335,31 @@ def _pela_slots(doc):
 
 def ledger_update(game, inv, path):
     """First-sight ownership for installs without Vortex: while a slot is held by ONE pak, remember that pak as the owner of the slot's wav /
-    PELA file. Later, when another pak claims the slot, the ledger still says who the files belonged to. Returns {normalized path: 'pak:<key>'}."""
+    PELA file (with the file's size+mtime). An entry is dropped when the file changed or its owner left the install; a changed file is
+    re-recorded if its slot has a single holder. Returns {normalized path: 'pak:<key>'}."""
     import json
     game = pathlib.Path(game); path = pathlib.Path(path)
     try: old = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError): old = {}
+    if not isinstance(old, dict): old = {}
     holders = collections.defaultdict(list)
     for k, v in inv.items():
         for sl in v: holders[sl].append(k)
     led = {}
-    for pth, who in old.items():                        # keep what is still true: file exists, owner still in the install
-        if os.path.exists(pth) and who[4:] in inv: led[pth] = who
+    for pth, e in old.items():                           # keep only what is still true
+        if isinstance(e, dict) and isinstance(e.get("o"), str) and e["o"][4:] in inv and e.get("s") == _sig(pth): led[pth] = e
+    def rec(f, who): led.setdefault(os.path.normcase(str(f)), {"o": "pak:" + who, "s": _sig(f)})
     audio = game / "Content" / "Paks" / "LogicMods" / "HD-ATOOL_P" / "audio"
     for f in (audio.iterdir() if audio.is_dir() else []):
-        if f.suffix.lower() == ".wav" and f.stem.isdigit() and len(holders.get(int(f.stem), [])) == 1:
-            led.setdefault(os.path.normcase(str(f)), "pak:" + holders[int(f.stem)][0])
+        if f.suffix.lower() == ".wav" and f.stem.isdigit() and len(holders.get(int(f.stem), [])) == 1: rec(f, holders[int(f.stem)][0])
     pela = game / "Content" / "Paks" / "~mods" / "PELA Patches"
     for f in sorted(pela.glob("*.json")) if pela.is_dir() else []:
-        try: sl = _pela_slots(json.loads(f.read_text(encoding="utf-8")))
+        try: sl = _pela_slots(json.loads(f.read_text(encoding="utf-8-sig")))
         except (OSError, ValueError): continue
         h = {holders[x][0] for x in sl if len(holders.get(x, [])) == 1}
-        if len(h) == 1: led.setdefault(os.path.normcase(str(f)), "pak:" + next(iter(h)))
-    if led != old: path.write_text(json.dumps(led, indent=1), encoding="utf-8")
-    return led
+        if len(h) == 1: rec(f, next(iter(h)))
+    if led != old: _save_manifest(path, led)
+    return {k: e["o"] for k, e in led.items()}
 
 def external_files(game, old, new, apply_to=None, backup=None, shared=False, mover=None, srcs=None):
     """slot-keyed files outside the pak. Returns a list of (what, path); with backup set, edits them (originals saved).
@@ -366,30 +378,32 @@ def external_files(game, old, new, apply_to=None, backup=None, shared=False, mov
             if dst.exists(): out.append(("wav not moved: %s exists" % dst.name, p)); continue
             if who == "mine":
                 out.append(("wav %s -> %s" % (p.name, dst.name), p))
-                if backup: p.rename(dst); apply_to is not None and apply_to.append({"kind": "rename", "from": str(p), "to": str(dst)})
+                if backup: apply_to.append({"kind": "rename", "from": str(p), "to": str(dst)}); p.rename(dst)
             else:
                 out.append(("wav %s copied to %s (owner unknown, slot shared)" % (p.name, dst.name), p))
-                if backup: shutil.copy2(p, dst); apply_to is not None and apply_to.append({"kind": "copy", "to": str(dst)})
+                if backup:
+                    stp = {"kind": "copy", "to": str(dst)}; apply_to.append(stp); shutil.copy2(p, dst); stp["sig"] = _sig(dst); _commit(apply_to)
     pefa = game / "Binaries" / "Win64" / "ue4ss" / "Mods" / "PEFA"
     names = pefa / "names.txt"
     if names.is_file():
-        txt = names.read_text(encoding="utf-8", errors="replace"); m = re.search(r"(?m)^%d(\s*=.*)$" % old, txt)
+        txt = names.read_bytes().decode("utf-8", "surrogateescape"); m = re.search(r"(?m)^%d(\s*=.*)$" % old, txt)       # lossless: bytes and line endings survive
         if m and not re.search(r"(?m)^%d\s*=" % new, txt):
             if shared:                                              # PEFA's names.txt has no owner: keep the old line, add one for the new slot
                 out.append(("PEFA names.txt: line %d copied to %d (slot shared)" % (old, new), names)); edit = lambda t: re.sub(r"(?m)^(%d)(\s*=.*)$" % old, lambda mm: mm.group(0) + "\n" + str(new) + mm.group(2), t, count=1)
             else:
                 out.append(("PEFA names.txt line %d -> %d" % (old, new), names)); edit = lambda t: re.sub(r"(?m)^%d(\s*=)" % old, lambda mm: str(new) + mm.group(1), t)
             if backup:
-                b = save(names); apply_to.append({"kind": "file", "path": str(names), "backup": str(b)}); names.write_text(edit(txt), encoding="utf-8", newline="")
+                b = save(names); stp = {"kind": "file", "path": str(names), "backup": str(b), "sig": None}; apply_to.append(stp)
+                names.write_bytes(edit(txt).encode("utf-8", "surrogateescape")); stp["sig"] = _sig(names); _commit(apply_to)
     for nm in ("packs_rows.txt", "packs_cache.txt"):
         p = pefa / nm
         if p.is_file():
             out.append(("PEFA cache %s deleted (PEFA rebuilds it)" % nm, p))
-            if backup: b = save(p); apply_to.append({"kind": "file", "path": str(p), "backup": str(b)}); p.unlink()
+            if backup: b = save(p); apply_to.append({"kind": "file", "path": str(p), "backup": str(b), "sig": None}); p.unlink()
     pela = game / "Content" / "Paks" / "~mods" / "PELA Patches"
     for p in sorted(pela.glob("*.json")) if pela.is_dir() else []:
-        try: doc = json.loads(p.read_text(encoding="utf-8"))
-        except ValueError: continue
+        try: doc = json.loads(p.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError): continue
         hit = [0]
         def walk(o):
             if isinstance(o, dict):
@@ -407,8 +421,8 @@ def external_files(game, old, new, apply_to=None, backup=None, shared=False, mov
         if who != "mine": out.append(("note: PELA %s keeps %d reference(s) to slot %d (%s)" % (p.name, hit[0], old, "belongs to another mod" if who == "theirs" else "owner unknown, slot shared"), p)); continue
         out.append(("PELA %s: %d reference(s)" % (p.name, hit[0]), p))
         if backup:
-            b = save(p); apply_to.append({"kind": "file", "path": str(p), "backup": str(b)})
-            p.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+            b = save(p); stp = {"kind": "file", "path": str(p), "backup": str(b), "sig": None}; apply_to.append(stp)
+            p.write_text(json.dumps(doc, indent=1), encoding="utf-8"); stp["sig"] = _sig(p); _commit(apply_to)
     return out
 
 def apply_move(root, game, key, old, new, backup, shared=False, srcs=None):
@@ -437,6 +451,7 @@ def apply_move(root, game, key, old, new, backup, shared=False, srcs=None):
         steps.append({"kind": "swap", "path": str(utoc), "backup": str(bt)}); os.replace(utoc, bt)      # originals renamed to *.orig next to the pak (same volume, instant, not mountable; a hard link to Vortex staging stays intact)
         steps.append({"kind": "swap", "path": str(ucas), "backup": str(bu)}); os.replace(ucas, bu)
         os.replace(nt, utoc); os.replace(nu, ucas)
+        steps[-2]["sig"] = _sig(utoc); steps[-1]["sig"] = _sig(ucas); _commit(steps)
         srcs = srcs if srcs is not None else sources(root)
         j["notes"] = [w for w, _p in external_files(game, old, new, steps, backup, shared, srcs.get(os.path.normcase(str(utoc))) or "pak:" + key, srcs)]
         _save_manifest(mp, j)
@@ -450,21 +465,33 @@ def apply_move(root, game, key, old, new, backup, shared=False, srcs=None):
 
 def revert_move(backup):
     """undo a move journal: put the original files back, newest step first. Tolerates steps that never happened and repeated calls.
+    A file that changed since the tool wrote it (re-deployed mod, edited names.txt) is NOT overwritten: it is reported and its backup kept.
     Returns the number of steps undone."""
     import json, shutil
     backup = pathlib.Path(backup); mp = backup / "manifest.json"
     if not mp.exists(): return 0
-    j = json.loads(mp.read_text()); n = 0
+    j = json.loads(mp.read_text()); n = 0; kept = 0
+    def changed(st, path):
+        if st.get("sig") is not None and os.path.exists(path) and _sig(path) != st["sig"]:
+            print("  not restored (changed since the move): %s" % path); return True
+        return False
     for st in reversed(j["steps"]):
         if st["kind"] == "swap":
-            if os.path.exists(st["backup"]): os.replace(st["backup"], st["path"]); n += 1
+            if os.path.exists(st["backup"]):
+                if changed(st, st["path"]): kept += 1; continue
+                os.replace(st["backup"], st["path"]); n += 1
         elif st["kind"] == "rename":
             if pathlib.Path(st["to"]).exists() and not pathlib.Path(st["from"]).exists(): os.replace(st["to"], st["from"]); n += 1
         elif st["kind"] == "copy":
-            if pathlib.Path(st["to"]).exists(): os.unlink(st["to"]); n += 1
+            if pathlib.Path(st["to"]).exists():
+                if changed(st, st["to"]): kept += 1; continue
+                os.unlink(st["to"]); n += 1
         elif st["kind"] == "file":
-            if os.path.exists(st["backup"]): shutil.copy2(st["backup"], st["path"]); n += 1
-    os.replace(mp, backup / "manifest.reverted.json")
+            if not os.path.exists(st["backup"]): continue
+            if st.get("sig") is None and os.path.exists(st["path"]): print("  not restored (recreated since the move): %s" % st["path"]); kept += 1; continue
+            if changed(st, st["path"]): kept += 1; continue
+            shutil.copy2(st["backup"], st["path"]); n += 1
+    os.replace(mp, backup / ("manifest.partial.json" if kept else "manifest.reverted.json"))
     return n
 
 def main(argv):
@@ -472,19 +499,23 @@ def main(argv):
     ap = argparse.ArgumentParser(prog="slots", description="Stellar Blade anim slot organizer (scan/plan only so far)")
     ap.add_argument("cmd", choices=["scan", "plan", "fixids", "moveslots", "revert"]); ap.add_argument("--game"); ap.add_argument("--ceiling", type=int, default=None, help="default: auto (1000, or the AToolSlotLimit limit)"); ap.add_argument("--reserved", default="reserved.txt")
     ap.add_argument("--apply", action="store_true", help="fixids/moveslots: really write (default: dry run)"); ap.add_argument("--pak", help="moveslots: move this pak (path relative to Paks, e.g. ~mods/BBS_P.utoc)"); ap.add_argument("--slot", type=int, help="moveslots --pak: the slot to move"); ap.add_argument("--to", type=int, help="moveslots --pak: the target slot"); ap.add_argument("--backup", default=os.path.join(HERE, "slot_backups")); ap.add_argument("--cache", default=os.path.join(HERE, "slot_cache.json")); ap.add_argument("--no-cache", action="store_true")
-    a = ap.parse_args(argv); g = find_game(a.game)
-    if not g: print("Stellar Blade not found; pass --game <...>\SB or set SB_GAME"); return 2
-    if a.cmd == "revert":
-        import glob
-        ds = [d for d in glob.glob(a.backup + "/ids-*") + glob.glob(a.backup + "/move-*") if os.path.exists(d + "/manifest.json")]
+    a = ap.parse_args(argv)
+    if a.cmd == "revert":                                  # journals hold absolute paths: no game folder needed
+        import glob, subprocess
+        if "SB-Win64-Shipping.exe" in subprocess.run(["tasklist"], capture_output=True, text=True).stdout: print("Stellar Blade is running: close it first"); return 2
+        ds = [d for d in glob.glob(glob.escape(a.backup) + "/ids-*") + glob.glob(glob.escape(a.backup) + "/move-*") if os.path.exists(d + "/manifest.json")]
         if not ds: print("nothing to revert in", a.backup); return 2
         ts = lambda d: re.search(r"(\d{8}-\d{6})", os.path.basename(d)).group(1)
         last = max(ts(d) for d in ds); grp = [d for d in ds if ts(d) == last]       # the newest run, its steps newest first
         grp.sort(key=lambda d: int(d.rsplit("-", 1)[1]) if os.path.basename(d).startswith("move-") else 0, reverse=True)
         for d in grp:
-            if os.path.basename(d).startswith("move-"): print("undid %d step(s) of %s" % (revert_move(d), d))
-            else: print("restored %d container id(s) from %s" % (revert_fix(d), d))
+            try:
+                if os.path.basename(d).startswith("move-"): print("undid %d step(s) of %s" % (revert_move(d), d))
+                else: print("restored %d container id(s) from %s" % (revert_fix(d), d))
+            except OSError as e: print("could not revert %s: %s (is the game or Vortex using the files?)" % (d, e)); return 2
         return 0
+    g = find_game(a.game)
+    if not g: print("Stellar Blade not found; pass --game <...>\SB or set SB_GAME"); return 2
     if a.ceiling is None: a.ceiling = detect_ceiling(g)
     t = time.time(); inv = scan(g / "Content" / "Paks", None if a.no_cache else a.cache)
     ledger = ledger_update(g, inv, os.path.join(os.path.dirname(os.path.abspath(a.cache)), "slot_owners.json"))
@@ -516,6 +547,8 @@ def main(argv):
             if kk not in inv: print("--pak %s is not an anim pak under %s (use the path shown by scan)" % (a.pak, paks)); return 2
             used = {x for v in inv.values() for x in v}
             if not (1 <= a.to <= a.ceiling) or a.to in rs or a.to in used: print("--to %d is not a free slot within 1..%d" % (a.to, a.ceiling)); return 2
+            c0, why0 = try_rename(paks, kk, a.slot, a.to)
+            if c0 is None: print("cannot move %s: %s" % (kk, why0)); return 2
             moves, unresolved = [(kk, a.slot, a.to)], []
         else: moves, unresolved = plan_moves(paks, inv, a.ceiling, rs)
         for slot, ps, why in unresolved:
@@ -532,7 +565,10 @@ def main(argv):
         if "SB-Win64-Shipping.exe" in subprocess.run(["tasklist"], capture_output=True, text=True).stdout: print("Stellar Blade is running: close it first"); return 2
         bk = "%s/move-%s" % (a.backup, _t.strftime("%Y%m%d-%H%M%S")); print("game folder:", g)
         for i, (k, o, n_) in enumerate(moves):
-            jn = apply_move(paks, g, k, o, n_, "%s-%d" % (bk, i), shared=shared(k, o), srcs=srcs)
+            try: jn = apply_move(paks, g, k, o, n_, "%s-%d" % (bk, i), shared=shared(k, o), srcs=srcs)
+            except BaseException:
+                if i: print("%d of %d move(s) were applied before this failure; `revert` undoes them (the failed one was rolled back already)" % (i, len(moves)))
+                raise
             for w in jn.get("notes", []): print("      " + w)
         print("moved %d slot(s); undo with: python slots.py revert (backup %s-*)" % (len(moves), bk)); return 0
     if a.cmd == "plan":
