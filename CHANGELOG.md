@@ -102,3 +102,8 @@ Entries are in development order; later sections are the final state (superseded
 - Installer: no console or no -Game is a clear message, the file-lock hint only appears for IO errors, an installation on an unsupported UE4SS (-InstallUnverified) says so, enabled.txt = 0 is reported.
 - release.ps1: requires a clean git tree, pins the tested DLL hash, builds the zip with one top-level folder and forward-slash names and asserts that.
 - PEFA names.txt: a name that cannot move because the target slot already has one is now reported.
+
+## 1.0.0 - observability rule
+- Project rule recorded in D:\Projects\AGENTS.md (every mod and tool needs a persistent log, startup host/version lines, no silent waits, an 'If something goes wrong' section). SlotOrganizer already complies; AToolSlotLimit is partial (documented, DLL change pending an in-game re-test).
+- README-USER.txt and the packaged AToolSlotLimit README gained troubleshooting for the optional mod (log location, working lines, failure signatures, what to attach).
+- release.ps1 writes the zip entries by hand: one top-level folder, forward-slash names, asserted.

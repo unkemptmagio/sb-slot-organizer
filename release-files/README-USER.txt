@@ -101,6 +101,16 @@ When you ask for help, attach that file. It contains the paths of your game and 
 what the tool printed - read it first if that matters to you - (paths can include your Windows user name, plus the file names of your mods) and no passwords.
 First try Undo-last-run.bat, then ask.
 
+IF THE OPTIONAL MOD DOES NOT WORK (AToolSlotLimit)
+It writes its lines into the UE4SS log:  <game>\SB\Binaries\Win64\ue4ss\UE4SS.log  (search for "AToolSlotLimit").
+  * Working:  "[AToolSlotLimit] v0.1 loaded, limit 9999" and, once ATOOL is loaded (usually within seconds of the
+              world loading), "[AToolSlotLimit] done: 3 constant(s) now 9999 (3 expected)".
+  * No "v0.1 loaded" line: the mod was not loaded - wrong UE4SS build, mod folder in the wrong place, or enabled.txt is 0.
+  * "loaded" but never "done": ATOOL's class was not found (ATOOL not installed or not loaded). The mod stays quiet while it
+    waits - that is a known gap of this version. Wait a minute in the world, then check again.
+  * "odd Script array" or "no 1000 constant": ATOOL's data looks different from the version it was made for.
+Attach UE4SS.log (or the lines containing AToolSlotLimit) when you ask for help. It contains your game folder path.
+
 CREDITS AND LICENSE
 SlotOrganizer is free software (MIT License, see LICENSE) and an independent community tool: it is
 not affiliated with Shift Up, ATOOL, PEFA, PELA, UE4SS or any mod author. It works with their
