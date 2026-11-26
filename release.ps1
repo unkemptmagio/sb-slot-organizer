@@ -1,4 +1,4 @@
-﻿# Builds dist\SlotOrganizer.exe and release\SlotOrganizer-<version>.zip. Fails closed: any problem throws, no stale zip is left behind.
+# Builds dist\SlotOrganizer.exe and release\SlotOrganizer-<version>.zip. Fails closed: any problem throws, no stale zip is left behind.
 param([string]$Game = $(if ($env:SB_GAME) { $env:SB_GAME } else { "E:\SteamLibrary\steamapps\common\StellarBlade\SB" }))
 function Run($what, [scriptblock]$cmd) { & $cmd; if ($LASTEXITCODE) { throw "$what failed (exit $LASTEXITCODE)" } }
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw "python not found on PATH" }
@@ -30,7 +30,14 @@ Set-Content "$stage\AToolSlotLimit\enabled.txt" "1" -Encoding ascii            #
 Set-Content "$stage\AToolSlotLimit\config.txt" "limit=9999" -Encoding ascii
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $stageFull = (Resolve-Path $stage).Path; $zipFull = Join-Path (Get-Location).Path $zip
-[IO.Compression.ZipFile]::CreateFromDirectory($stageFull, $zipFull, [IO.Compression.CompressionLevel]::Optimal, $true)   # one top-level folder, forward-slash entry names
+# one top-level folder and forward-slash entry names; CreateFromDirectory writes backslashes on Windows PowerShell 5.1, so the entries are written by hand
+$fs = [IO.File]::Create($zipFull); $za = New-Object IO.Compression.ZipArchive($fs, [IO.Compression.ZipArchiveMode]::Create)
+try {
+    Get-ChildItem -LiteralPath $stageFull -Recurse -File | ForEach-Object {
+        $entry = $za.CreateEntry("SlotOrganizer-$ver/" + $_.FullName.Substring($stageFull.Length + 1).Replace('\', '/'), [IO.Compression.CompressionLevel]::Optimal)
+        $es = $entry.Open(); $in = [IO.File]::OpenRead($_.FullName); try { $in.CopyTo($es) } finally { $in.Dispose(); $es.Dispose() }
+    }
+} finally { $za.Dispose(); $fs.Dispose() }
 if (-not (Test-Path $zip)) { throw "zip was not created" }
 $zf = [IO.Compression.ZipFile]::OpenRead($zipFull); $names = $zf.Entries | ForEach-Object { $_.FullName }; $zf.Dispose()
 if ($names | Where-Object { $_ -match '\\' }) { throw "zip entry names contain backslashes" }
