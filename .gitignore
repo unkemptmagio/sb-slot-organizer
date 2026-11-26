@@ -9,3 +9,5 @@ work/
 tmp/
 release/
 logs/
+slot_owners.json
+slot_backups*/
