@@ -54,4 +54,6 @@ print("ok")
 g2 = pathlib.Path(tempfile.mkdtemp())
 assert S.ceiling_warning(g2, 1000) is None and "NOT show up" in S.ceiling_warning(g2, 2000)          # no mod: higher ceiling would be invisible
 U.write_bytes(b"other ue4ss"); assert "NOT show up" in S.ceiling_warning(g, 5000) and "not one it is verified" in S.ceiling_warning(g, 1000)
-
+# untested-but-supported UE4SS builds: named, ceiling stays 1000
+U.write_bytes(b"chrisr0 build"); S.UNTESTED_UE4SS[hashlib.sha256(b"chrisr0 build").hexdigest().upper()] = "Chrisr0 test"
+assert S.ue4ss_untested(g) == "Chrisr0 test" and S.ue4ss_build(g, KN) is None and S.detect_ceiling(g, KN) == 1000 and "not been verified in game" in S.ceiling_warning(g, 1000)

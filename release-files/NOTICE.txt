@@ -41,3 +41,6 @@ be distributed under any license.
 OPTIONAL: AToolSlotLimit
 The AToolSlotLimit folder is a separate UE4SS mod (same MIT license). It is built against the
 UE4SS C++ API (MIT, https://github.com/UE4SS-RE/RE-UE4SS) and is optional. It is verified only with the RevOG SB-UE4SS 1.3 build; see README-USER.txt.
+
+fmt
+Both AToolSlotLimit DLLs statically link the {fmt} formatting library (Copyright (c) 2012 - present, Victor Zverovich and {fmt} contributors; fmt 11.2.0 in the RevOG build, 10.2.1 in the Chrisr0 build), distributed under the MIT License, the same terms as printed above for CityHash.

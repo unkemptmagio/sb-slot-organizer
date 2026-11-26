@@ -132,16 +132,28 @@ def id_clashes(root):
 # UE4SS builds AToolSlotLimit's DLL is verified to load with (symbol check + in-game, 2026-11-25). The DLL links to C++ symbols of the
 # host UE4SS; builds without them (Chrisr0/RE-UE4SS 3.1.0-5, SB-UE4SS 3.1.6) cannot load it.
 KNOWN_UE4SS = {"E0CC51CE5B47D5BE82194510B0B4B4054DD15CE0322A983655A022F92D27DABE": "RevOG SB-UE4SS 1.3"}
+# builds a DLL exists for (every import resolves against their UE4SS.dll, checked with dumpbin 2026-11-25) but that has not run in game yet:
+# the installer offers the right DLL, the tool keeps the ceiling at 1000 until the hash moves to KNOWN_UE4SS after an in-game test.
+UNTESTED_UE4SS = {"2E7B3E7E8760263B99AD45FD3EE3C35930E43D8C38D15B7E41685E8A3C26E2C4": "Chrisr0 RE-UE4SS 3.1.0-4",
+                  "458839B77D05255F228045210270B01597D47FC83004CD47937126B2409A26EE": "Chrisr0 RE-UE4SS 3.1.0-5",
+                  "F3F0229E8D046824C6D71DB256F1C9BBBDA9652A193643C28FA4E6C329E17670": "Chrisr0 RE-UE4SS 3.1.0-6 (= SB-UE4SS 3.1.6)"}
 
-def ue4ss_build(game, known=None):
-    """name of the installed UE4SS if it is one AToolSlotLimit is verified with, else None"""
+def _ue4ss_hash(game):
     import hashlib
     w = pathlib.Path(game) / "Binaries" / "Win64"
     for c in (w / "ue4ss" / "UE4SS.dll", w / "UE4SS.dll"):
         if c.is_file():
-            try: return (KNOWN_UE4SS if known is None else known).get(hashlib.sha256(c.read_bytes()).hexdigest().upper())
+            try: return hashlib.sha256(c.read_bytes()).hexdigest().upper()
             except OSError: return None
     return None
+
+def ue4ss_build(game, known=None):
+    """name of the installed UE4SS if it is one AToolSlotLimit is verified with in game, else None"""
+    return (KNOWN_UE4SS if known is None else known).get(_ue4ss_hash(game))
+
+def ue4ss_untested(game):
+    """name of the installed UE4SS if a DLL exists for it but it has not been tested in game yet"""
+    return UNTESTED_UE4SS.get(_ue4ss_hash(game))
 
 def detect_ceiling(game, known=None):
     """highest usable slot: 1000 (ATOOL's own loop bound), or the `limit=` of the AToolSlotLimit mod when it is installed, enabled AND the
@@ -163,7 +175,10 @@ def ceiling_warning(game, ceiling):
     """a note when the ceiling in use is higher than what will work in game, or when the mod is installed but cannot be trusted"""
     auto = detect_ceiling(game)
     if ceiling > auto: return "warning: slots above %d only work with AToolSlotLimit loaded by a verified UE4SS (RevOG SB-UE4SS 1.3); on your setup clips moved there would NOT show up in game." % auto
-    if ceiling == 1000 and (pathlib.Path(game) / "Binaries" / "Win64" / "ue4ss" / "Mods" / "AToolSlotLimit" / "dlls" / "main.dll").is_file() and not ue4ss_build(game):
+    mod = (pathlib.Path(game) / "Binaries" / "Win64" / "ue4ss" / "Mods" / "AToolSlotLimit" / "dlls" / "main.dll").is_file()
+    if ceiling == 1000 and mod and not ue4ss_build(game) and ue4ss_untested(game):
+        return "note: AToolSlotLimit has a build for your UE4SS (%s) but it has not been verified in game yet, so slots stay within 1..1000." % ue4ss_untested(game)
+    if ceiling == 1000 and mod and not ue4ss_build(game):
         return "note: AToolSlotLimit is installed but your UE4SS build is not one it is verified with (RevOG SB-UE4SS 1.3, or its DLL could not be read), so slots stay within 1..1000."
     return None
 
