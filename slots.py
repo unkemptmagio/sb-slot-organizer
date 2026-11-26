@@ -2,6 +2,8 @@
 import struct, re, pathlib, collections, sys, os
 VERSION = "1.0.0"
 HERE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+# journals, ledger and cache live where they survive re-extracting a new release: %LOCALAPPDATA%\SlotOrganizer for the exe, the repo folder from source
+DATA = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "SlotOrganizer") if getattr(sys, "frozen", False) else HERE
 
 SLOT_RE = re.compile(r"/Game/Mods/HD-ATOOL_P/anim/(\d+)(?:a)?[/.]", re.I)
 
@@ -56,13 +58,24 @@ def pak_slots(path):
         if m: out.add(int(m.group(1)))
     return out
 
+def _sb(p):
+    """accept the SB folder or the StellarBlade root"""
+    p = pathlib.Path(p)
+    if (p / "Content" / "Paks").is_dir(): return p.resolve()
+    if (p / "SB" / "Content" / "Paks").is_dir(): return (p / "SB").resolve()
+    return None
+
 def find_game(arg=None):
-    """game's SB folder: --game, $SB_GAME, then Steam libraries. ponytail: no Epic/GOG detection"""
+    """game's SB folder: --game, $SB_GAME, the remembered path (game.txt), then Steam libraries. ponytail: no Epic/GOG detection (the double-click flow asks once)"""
     import os, json
-    if arg: return pathlib.Path(arg).resolve() if (pathlib.Path(arg) / "Content" / "Paks").is_dir() else None     # an explicit --game never falls back to another install
-    for c in [os.environ.get("SB_GAME")]:
-        if c and (pathlib.Path(c) / "Content" / "Paks").is_dir(): return pathlib.Path(c).resolve()
-        if c: print("warning: SB_GAME=%s is not a Stellar Blade SB folder, ignored" % c)
+    if arg: return _sb(arg)                               # an explicit --game never falls back to another install
+    c = os.environ.get("SB_GAME")
+    if c:
+        if _sb(c): return _sb(c)
+        print("warning: SB_GAME=%s is not a Stellar Blade folder, ignored" % c)
+    try: r = open(os.path.join(DATA, "game.txt"), encoding="utf-8").read().strip()
+    except OSError: r = ""
+    if r and _sb(r): return _sb(r)
     roots = []
     try:
         import winreg
@@ -85,18 +98,21 @@ def scan(root, cache_file=None):
     cache = {}
     if cache_file and pathlib.Path(cache_file).exists():
         try: cache = json.loads(pathlib.Path(cache_file).read_text())
-        except ValueError: cache = {}          # corrupt cache: rebuild, never fatal
+        except (OSError, ValueError): cache = {}          # corrupt cache: rebuild, never fatal
+    if not isinstance(cache, dict): cache = {}
     inv, new, hits = {}, {}, 0
     for p in sorted(pathlib.Path(root).rglob("*")):
         e = p.suffix.lower()
         if p.stem.endswith(".new") or e not in (".utoc", ".pak") or not p.is_file() or (e == ".pak" and p.with_suffix(".utoc").exists()): continue
         st = p.stat(); key = str(p.relative_to(root)).replace("\\", "/"); sig = [st.st_size, int(st.st_mtime)]
         c = cache.get(key)
-        if c and c["sig"] == sig: slots = c["slots"]; hits += 1
+        if isinstance(c, dict) and c.get("sig") == sig and isinstance(c.get("slots"), list): slots = c["slots"]; hits += 1
         else: slots = sorted(pak_slots(p))
         new[key] = {"sig": sig, "slots": slots}
         if slots: inv[key] = slots
-    if cache_file: pathlib.Path(cache_file).write_text(json.dumps(new))
+    if cache_file:
+        try: os.makedirs(os.path.dirname(os.path.abspath(cache_file)), exist_ok=True); pathlib.Path(cache_file).write_text(json.dumps(new))
+        except OSError: pass                              # read-only location: the cache is optional
     scan.hits = hits
     return inv
 
@@ -242,7 +258,7 @@ def revert_fix(backup):
 # ---- move a pak's clip to another slot (rewrites the IoStore container, see iostore.py)
 def _save_manifest(path, j):
     import json
-    t = str(path) + ".tmp"
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True); t = str(path) + ".tmp"
     with open(t, "w", encoding="utf-8") as f: json.dump(j, f, indent=1); f.flush(); os.fsync(f.fileno())
     os.replace(t, path)
 
@@ -360,7 +376,9 @@ def ledger_update(game, inv, path):
         except (OSError, ValueError): continue
         h = {holders[x][0] for x in sl if len(holders.get(x, [])) == 1}
         if len(h) == 1: rec(f, next(iter(h)))
-    if led != old: _save_manifest(path, led)
+    if led != old:
+        try: _save_manifest(path, led)
+        except OSError: pass                              # cannot persist the ledger: still usable this run
     return {k: e["o"] for k, e in led.items()}
 
 def external_files(game, old, new, apply_to=None, backup=None, shared=False, mover=None, srcs=None):
@@ -439,11 +457,11 @@ def apply_move(root, game, key, old, new, backup, shared=False, srcs=None):
         if not _lock_ok(p): raise SystemExit("%s is locked (game running?)" % p.name)
     t, u = iostore.container_bytes(c)
     if shutil.disk_usage(root).free < len(t) + len(u) + (1 << 20): raise SystemExit("not enough free disk space for the rewritten container")
-    nt = utoc.with_name(utoc.stem + ".new.utoc"); nu = utoc.with_name(utoc.stem + ".new.ucas")
-    j = {"kind": "move", "pak": key, "old": old, "new": new, "steps": []}; mp = backup / "manifest.json"
+    nt = utoc.with_name(utoc.name + ".new"); nu = ucas.with_name(ucas.name + ".new")        # not mountable names
+    j = {"kind": "move", "pak": key, "old": old, "new": new, "steps": [], "done": False}; mp = backup / "manifest.json"
     try:
         nt.write_bytes(t); nu.write_bytes(u)
-        c2 = iostore.read_container(nt)                                 # verify what was written, not what we meant to write
+        c2 = iostore.read_container(nt, nu)                                 # verify what was written, not what we meant to write
         if iostore.check_container(c2) or new not in iostore.slots_in(c2) or old in iostore.slots_in(c2):
             raise SystemExit("verification of the rewritten container failed, nothing changed")
         _save_manifest(mp, j)
@@ -456,7 +474,7 @@ def apply_move(root, game, key, old, new, backup, shared=False, srcs=None):
         steps[-2]["sig"] = _sig(utoc); steps[-1]["sig"] = _sig(ucas); _commit(steps)
         srcs = srcs if srcs is not None else sources(root)
         j["notes"] = [w for w, _p in external_files(game, old, new, steps, backup, shared, srcs.get(os.path.normcase(str(utoc))) or "pak:" + key, srcs)]
-        _save_manifest(mp, j)
+        j["done"] = True; _save_manifest(mp, j)
     except BaseException:
         for x in (nt, nu):
             try: x.unlink()
@@ -493,39 +511,79 @@ def revert_move(backup):
             if st.get("sig") is None and os.path.exists(st["path"]): print("  not restored (recreated since the move): %s" % st["path"]); kept += 1; continue
             if changed(st, st["path"]): kept += 1; continue
             shutil.copy2(st["backup"], st["path"]); n += 1
+    revert_move.kept = kept
     os.replace(mp, backup / ("manifest.partial.json" if kept else "manifest.reverted.json"))
     return n
 
+def _game_running():
+    import subprocess
+    try: return "SB-Win64-Shipping.exe" in subprocess.run(["tasklist"], capture_output=True, text=True).stdout
+    except OSError: return False                              # no tasklist: the file-lock checks still protect
+
+def interrupted(backup):
+    """move journals that were started but never finished (crash, power loss, closed window)"""
+    import glob, json
+    out = []
+    for d in glob.glob(glob.escape(backup) + "/move-*"):
+        try:
+            if json.loads(open(d + "/manifest.json", encoding="utf-8").read()).get("done") is False: out.append(d)       # journals from before this flag existed are not flagged
+        except (OSError, ValueError): pass
+    return out
+
+def sweep_temp(paks):
+    """remove temp containers a killed run may have left in Paks (they would be mounted by the game); returns the removed names"""
+    out = []
+    for pat in ("*.utoc.new", "*.ucas.new", "*.new.utoc", "*.new.ucas"):
+        for f in pathlib.Path(paks).rglob(pat):
+            try: f.unlink(); out.append(f.name)
+            except OSError: pass
+    return out
+
 def _ask(q):
     try: return input("%s [y/N] " % q).strip().lower() in ("y", "yes")
-    except EOFError: return False
+    except (EOFError, RuntimeError, OSError): return False
 
 def main(argv):
     import argparse, time
-    ap = argparse.ArgumentParser(prog="slots", description="Stellar Blade anim slot organizer (scan/plan only so far)")
-    ap.add_argument("cmd", choices=["scan", "plan", "fixids", "moveslots", "auto", "revert"]); ap.add_argument("--game"); ap.add_argument("--ceiling", type=int, default=None, help="default: auto (1000, or the AToolSlotLimit limit)"); ap.add_argument("--reserved", default="reserved.txt")
-    ap.add_argument("--apply", action="store_true", help="fixids/moveslots: really write (default: dry run)"); ap.add_argument("--pak", help="moveslots: move this pak (path relative to Paks, e.g. ~mods/BBS_P.utoc)"); ap.add_argument("--slot", type=int, help="moveslots --pak: the slot to move"); ap.add_argument("--to", type=int, help="moveslots --pak: the target slot"); ap.add_argument("--backup", default=os.path.join(HERE, "slot_backups")); ap.add_argument("--cache", default=os.path.join(HERE, "slot_cache.json")); ap.add_argument("--no-cache", action="store_true"); ap.add_argument("--version", action="version", version="SlotOrganizer " + VERSION); ap.add_argument("--yes", action="store_true", help="apply without asking")
+    ap = argparse.ArgumentParser(prog="slots", description="Stellar Blade anim slot organizer (scan, fixids, moveslots, auto, revert)")
+    ap.add_argument("cmd", choices=["scan", "plan", "fixids", "moveslots", "auto", "revert"]); ap.add_argument("--game"); ap.add_argument("--ceiling", type=int, default=None, help="default: auto (1000, or the AToolSlotLimit limit)"); ap.add_argument("--reserved", default=os.path.join(HERE, "reserved.txt")); ap.add_argument("--run", help=argparse.SUPPRESS)
+    ap.add_argument("--apply", action="store_true", help="fixids/moveslots: really write (default: dry run)"); ap.add_argument("--pak", help="moveslots: move this pak (path relative to Paks, e.g. ~mods/BBS_P.utoc)"); ap.add_argument("--slot", type=int, help="moveslots --pak: the slot to move"); ap.add_argument("--to", type=int, help="moveslots --pak: the target slot"); ap.add_argument("--backup", default=os.path.join(DATA, "slot_backups")); ap.add_argument("--cache", default=os.path.join(DATA, "slot_cache.json")); ap.add_argument("--no-cache", action="store_true"); ap.add_argument("--version", action="version", version="SlotOrganizer " + VERSION); ap.add_argument("--yes", action="store_true", help="apply without asking")
     a = ap.parse_args(argv)
     if a.cmd == "revert":                                  # journals hold absolute paths: no game folder needed
-        import glob, subprocess
-        if "SB-Win64-Shipping.exe" in subprocess.run(["tasklist"], capture_output=True, text=True).stdout: print("Stellar Blade is running: close it first"); return 2
+        import glob
+        if _game_running(): print("Stellar Blade is running: close it first"); return 2
         ds = [d for d in glob.glob(glob.escape(a.backup) + "/ids-*") + glob.glob(glob.escape(a.backup) + "/move-*") if os.path.exists(d + "/manifest.json")]
         if not ds: print("nothing to revert in", a.backup); return 2
         ts = lambda d: re.search(r"(\d{8}-\d{6})", os.path.basename(d)).group(1)
-        last = max(ts(d) for d in ds); grp = [d for d in ds if ts(d) == last]       # the newest run, its steps newest first
-        grp.sort(key=lambda d: int(d.rsplit("-", 1)[1]) if os.path.basename(d).startswith("move-") else 0, reverse=True)
+        last = max(ts(d) for d in ds); grp = [d for d in ds if ts(d) == last]       # the newest run: its moves newest first, then its id patches
+        grp.sort(key=lambda d: (0, -int(d.rsplit("-", 1)[1])) if os.path.basename(d).startswith("move-") else (1, 0))
+        kept = 0
         for d in grp:
             try:
-                if os.path.basename(d).startswith("move-"): print("undid %d step(s) of %s" % (revert_move(d), d))
+                if os.path.basename(d).startswith("move-"): print("undid %d step(s) of %s" % (revert_move(d), d)); kept += getattr(revert_move, "kept", 0)
                 else: print("restored %d container id(s) from %s" % (revert_fix(d), d))
             except OSError as e: print("could not revert %s: %s (is the game or Vortex using the files?)" % (d, e)); return 2
+        if kept: print("\n%d file(s) were NOT restored because they changed after the tool wrote them; the originals are still beside them as *.orig - check them by hand." % kept); return 3
         return 0
     g = find_game(a.game)
-    if not g: print("Stellar Blade not found; pass --game <...>\SB or set SB_GAME"); return 2
-    if a.cmd == "auto":                                    # what a double-click does: fix slot clashes and container ids, asking first
-        base = ["--game", str(g), "--backup", a.backup, "--cache", a.cache, "--reserved", a.reserved, "--apply"] + (["--yes"] if a.yes else [])
-        r = max(main(["moveslots"] + base), main(["fixids"] + base))
-        print("\nUndo any of this with: SlotOrganizer.exe revert"); return 0 if r in (0, 1) else r
+    if not g and not a.game and sys.stdin is not None and sys.stdin.isatty():
+        try: r = input("Stellar Blade not found automatically. Paste the folder that contains SB (e.g. D:\\Games\\StellarBlade): ").strip().strip('"')
+        except (EOFError, RuntimeError, OSError): r = ""
+        g = _sb(r) if r else None
+        if g:
+            try: os.makedirs(DATA, exist_ok=True); open(os.path.join(DATA, "game.txt"), "w", encoding="utf-8").write(str(g))
+            except OSError: pass
+    if not g: print("Stellar Blade not found; pass --game <path to StellarBlade or its SB folder> or set SB_GAME"); return 2
+    if a.cmd == "auto":                                    # what a double-click does: fix container ids, then slot clashes, asking first; one run stamp so `revert` undoes both
+        import time as _t
+        run = _t.strftime("%Y%m%d-%H%M%S")
+        base = ["--game", str(g), "--backup", a.backup, "--cache", a.cache, "--reserved", a.reserved, "--apply", "--run", run] + (["--yes"] if a.yes else []) + (["--ceiling", str(a.ceiling)] if a.ceiling else []) + (["--no-cache"] if a.no_cache else [])
+        r1 = main(["fixids"] + base)
+        if r1 >= 2: return r1
+        r2 = main(["moveslots"] + base)
+        if r2 >= 2: return r2
+        if os.path.isdir(a.backup) and any(os.path.basename(d).endswith(run) or run in d for d in os.listdir(a.backup)): print("\nUndo this run with: SlotOrganizer.exe revert")
+        return 0
     if a.ceiling is None: a.ceiling = detect_ceiling(g)
     t = time.time(); inv = scan(g / "Content" / "Paks", None if a.no_cache else a.cache)
     lp = os.path.join(os.path.dirname(os.path.abspath(a.cache)), "slot_owners.json"); first_run = not os.path.exists(lp)
@@ -535,7 +593,9 @@ def main(argv):
     for s, p in sorted(cl.items()): print("  clash slot %d: %s" % (s, " | ".join(p)))
     idc = id_clashes(g / "Content" / "Paks"); anim = {k.replace("\\", "/") for k in inv}
     hit = {v: ks for v, ks in idc.items() if any(k in anim for k in ks)}
-    print("%d container-id clashes (%d involve anim paks: only one pak per id mounts, the other one's clips are unavailable)" % (len(idc), len(hit)))
+    if hit: print("%d container-id clash(es) involve anim paks (only one pak per id mounts, the other one's clips are unavailable)" % len(hit))
+    iv = interrupted(a.backup)
+    if iv: print("WARNING: an interrupted run was found (%s). Run SlotOrganizer.exe revert before changing anything." % ", ".join(os.path.basename(d) for d in iv))
     for v, ks in hit.items(): print("  id %#x: %s" % (v, " | ".join(ks)))
     cl = {**cl, **{("id", v): ks for v, ks in hit.items()}}
     if a.cmd == "fixids":
@@ -544,12 +604,15 @@ def main(argv):
         for k, o, n in fx: print("  %s: id %#x -> %#x" % (k, o, n))
         if not fx: print("nothing to fix"); return 0
         if not a.apply: print("dry run: %d container id(s) would change (add --apply, close the game first)" % len(fx)); return 1
-        if "SB-Win64-Shipping.exe" in subprocess.run(["tasklist"], capture_output=True, text=True).stdout: print("Stellar Blade is running: close it first"); return 2
+        if _game_running(): print("Stellar Blade is running: close it first"); return 2
+        if iv: print("not applying while an interrupted run is pending"); return 2
         if not a.yes and not _ask("Patch %d container id(s) now?" % len(fx)): print("cancelled, nothing changed"); return 1
-        bk = "%s/ids-%s" % (a.backup, _t.strftime("%Y%m%d-%H%M%S")); print("game folder:", g)
+        if _game_running(): print("Stellar Blade was started meanwhile: close it first"); return 2
+        sweep_temp(g / "Content" / "Paks")
+        bk = "%s/ids-%s" % (a.backup, a.run or _t.strftime("%Y%m%d-%H%M%S")); print("game folder:", g)
         done, skipped = apply_fix(g / "Content" / "Paks", fx, bk)
         for k, why in skipped: print("  skipped %s: %s" % (k, why))
-        print("changed %d container id(s); undo with: python slots.py revert (backup %s)" % (len(done), bk)); return 0
+        print("changed %d container id(s); undo with: SlotOrganizer.exe revert (journal %s)" % (len(done), bk)); return 0
     if a.cmd == "moveslots":
         import subprocess, time as _t
         paks = g / "Content" / "Paks"; rs = load_reserved(a.reserved)
@@ -575,24 +638,38 @@ def main(argv):
             for what, _p in external_files(g, o, n, shared=shared(k, o), mover=mover(k), srcs=srcs): print("      " + what)
         if not moves: print("nothing to move"); return 1 if unresolved else 0
         if not a.apply: print("dry run: %d move(s) (add --apply, close the game first)" % len(moves)); return 1
-        if "SB-Win64-Shipping.exe" in subprocess.run(["tasklist"], capture_output=True, text=True).stdout: print("Stellar Blade is running: close it first"); return 2
+        if _game_running(): print("Stellar Blade is running: close it first"); return 2
+        if iv: print("not applying while an interrupted run is pending"); return 2
         if not a.yes and not _ask("Move %d slot(s) now? (originals are kept as .orig, `revert` undoes it)" % len(moves)): print("cancelled, nothing changed"); return 1
-        bk = "%s/move-%s" % (a.backup, _t.strftime("%Y%m%d-%H%M%S")); print("game folder:", g)
+        if _game_running(): print("Stellar Blade was started meanwhile: close it first"); return 2
+        sweep_temp(paks)
+        bk = "%s/move-%s" % (a.backup, a.run or _t.strftime("%Y%m%d-%H%M%S")); print("game folder:", g)
         for i, (k, o, n_) in enumerate(moves):
             try: jn = apply_move(paks, g, k, o, n_, "%s-%d" % (bk, i), shared=shared(k, o), srcs=srcs)
             except BaseException:
                 if i: print("%d of %d move(s) were applied before this failure; `revert` undoes them (the failed one was rolled back already)" % (i, len(moves)))
                 raise
             for w in jn.get("notes", []): print("      " + w)
-        print("moved %d slot(s); undo with: python slots.py revert (backup %s-*)" % (len(moves), bk)); return 0
+        print("moved %d slot(s); undo with: SlotOrganizer.exe revert (journal %s-*)" % (len(moves), bk)); return 0
     if a.cmd == "plan":
         mv = plan(inv, a.ceiling, reserved=load_reserved(a.reserved))
         for k, o, n in mv: print("  %s: %d -> %d" % (k, o, n))
         print("%d moves proposed (nothing is changed on disk yet)" % len(mv))
     return 1 if cl else 0
 
-if __name__ == "__main__":
+def _cli():
     dbl = len(sys.argv) == 1                         # double-clicked exe: find clashes, show them, ask, fix, wait
-    rc = main(sys.argv[1:] or ["auto"])
-    if dbl and getattr(sys, "frozen", False): input("\nPress Enter to close")
+    try: rc = main(sys.argv[1:] or ["auto"])
+    except SystemExit as e:
+        rc = e.code if isinstance(e.code, int) else 1
+        if isinstance(e.code, str): print(e.code)
+    except KeyboardInterrupt: print("interrupted"); rc = 130
+    except BaseException:
+        import traceback; traceback.print_exc(); print("\nUnexpected error. Nothing is left half-done unless the line above says so; `SlotOrganizer.exe revert` undoes the last run."); rc = 1
+    if dbl and getattr(sys, "frozen", False):
+        try: input("\nPress Enter to close")
+        except (EOFError, RuntimeError, OSError): pass
     sys.exit(rc)
+
+if __name__ == "__main__":
+    _cli()

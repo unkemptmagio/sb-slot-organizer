@@ -151,4 +151,21 @@ assert not S.clashes(S.scan(sb / "Content" / "Paks")) and (pm / "two.utoc.orig")
 assert S.main(["revert"] + args) == 0
 assert {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in pm.iterdir()} == h_e2e
 assert S.main(["moveslots", "--pak", "~mods/two.pak", "--slot", "700", "--to", "710"] + args) == 2    # not a scanned pak: refused
+# blocker from review: a pak with BOTH a slot clash and a container-id clash -> auto (ids first, then moves, one run stamp) -> ONE revert restores everything
+sb2 = tmp / "sb2"; pm2 = sb2 / "Content" / "Paks" / "~mods"; pm2.mkdir(parents=True)
+make_pak(pm2, "one", 700, cid=77); make_pak(pm2, "two", 700, cid=77); os.utime(pm2 / "two.utoc", (2e9, 2e9))          # same slot AND same container id
+h2 = {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in pm2.iterdir()}
+args2 = ["--game", str(sb2), "--backup", str(tmp / "e2e2_bk"), "--cache", str(tmp / "e2e2_cache.json")]
+assert S.main(["auto", "--yes"] + args2) == 0
+assert not S.clashes(S.scan(sb2 / "Content" / "Paks")) and not S.id_clashes(sb2 / "Content" / "Paks")
+assert S.main(["revert"] + args2) == 0                                                  # one revert undoes the whole run
+assert {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in pm2.iterdir()} == h2, "revert after auto did not restore"
+# interrupted-run detection and stale temp sweep
+(pm2 / "x.utoc.new").write_bytes(b"junk"); (pm2 / "y.new.ucas").write_bytes(b"junk"); assert sorted(S.sweep_temp(sb2 / "Content" / "Paks")) == ["x.utoc.new", "y.new.ucas"]
+os.makedirs(tmp / "ib" / "move-20260101-000000-0"); (tmp / "ib" / "move-20260101-000000-0" / "manifest.json").write_text('{"steps": [], "done": false}')
+assert S.interrupted(str(tmp / "ib")) and not S.interrupted(str(tmp / "none"))
+# short-input branches (0-16, 17-32, 33-64), unconditional: real stored hashes + the real package id of anim/982 (60 bytes of UTF-16)
+KAT_SHORT = [('2', 6920640749119438759), ('wb', 13859483922156345979), ('top', 2125795074522444111), ('font', 4674223610502732611), ('class', 7772006167705430957), ('content', 11758975885699655676), ('bindings', 18242279994439662761), ('bautosize', 12257212597591960947), ('canvaspanelslot', 17824498634351576271), ('eslatevisibility', 12978709467158065097), ('horizontalboxslot', 1518588668669284949), ('default__canvaspanelslot', 8885987693529693801), ('eslatecheckboxtype::togglebutton', 13553808718295507493), ('/game/mods/darui_p/cursor_default', 17311069008932939833), ('/game/mods/hd-atool_p/p901/newmale_mesh_skeleton', 16315670706392073306), ('/game/art/bg/actor/interaction/wine_bottle/wine_bottle_skeleton', 7100514524833140975), ('/game/art/character/monster/ch_m_na_19/materials/mi_m_na_19_body', 9034285803720795553)]
+assert all(I.cityhash64(k.encode()) == h for k, h in KAT_SHORT), "CityHash64 short branches regressed"
+assert I.package_id("/Game/Mods/HD-ATOOL_P/anim/982") == 3876099187860792978
 print("ok")

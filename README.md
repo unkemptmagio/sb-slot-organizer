@@ -3,11 +3,10 @@
 Pregame tool for Stellar Blade anim paks: finds every ATOOL slot (`/Game/Mods/HD-ATOOL_P/anim/<slot>`) your installed packs use,
 reports clashes, and proposes a conflict-free layout. Python 3.10, stdlib only.
 
-## Status (2026-11-25)
-Built: `scan` and `plan` (read-only), per-pak cache, Steam game-folder detection. Verified on a real install: 16 paks, 351 slots, 0.98 s cold, 0.26 s cached.
+## Status (2026-11-25): v1.0.0
+Built and verified in game: `scan`, `fixids`, `moveslots`, `auto` (what a double-click does), `revert`, the `.exe` and `release.ps1` packaging. Journals, ledger and cache live in `%LOCALAPPDATA%\SlotOrganizer` for the exe (the repo folder from source). End-user text: `release-files/README-USER.txt`. Verified on a real install: 19 paks, 354 slots, ~0.5 s cached.
 Also reports IoStore container-ID clashes (u64 at TOC offset 56): when two paks share an id only one mounts and the other's clips never load. Verified 2026-11-25 on a real install: ESAP (slots 700-709) clashes with Death Expression and OldDroid (307-311) with GildedRoseDress Part2, which is why their clips were missing from ATOOL's list. That, not the slot number, is the real cause of most 'clip unavailable' cases.
-NOT built yet: `apply` / `revert` and the `.exe` packaging. Why: slot numbers are baked into IoStore pak asset paths, so moving a third-party
-clip needs a rewrite we have not proven safe. See `docs/next.md`.
+Moving a third-party clip means rewriting the IoStore container (slot numbers are baked into the asset paths); that is what `moveslots` does, with journaling and rollback. Open items: `docs/next.md`.
 
 ## fixids (2026-11-25, built, dry run verified on the real install, applied 2026-11-25)
 `python slots.py fixids` lists container-id clashes that stop an anim pak from mounting and the new unique id it would get; `--apply` writes it (game closed), `python slots.py revert` restores the last backup (`slot_backups/ids-*/manifest.json` keeps the old ids and byte offsets). Only anim paks are patched, never the other mod of a clash. Patches the id in all three places it lives (utoc header +56, the ContainerHeader chunk id in the TOC, first 8 bytes of that chunk in the .ucas); refuses when the three disagree or the chunk is compressed. Note: Vortex hard-links mod files (ESAP has 2 links), so the staged copy changes too; a Vortex re-deploy keeps the patch, a re-download of the mod restores the clash.

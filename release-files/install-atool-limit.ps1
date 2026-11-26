@@ -1,9 +1,27 @@
 ﻿# Installs the optional AToolSlotLimit UE4SS mod (lifts ATOOL's 1000-slot limit).
+# Usage: install-atool-limit.bat   (or: powershell -ExecutionPolicy Bypass -File install-atool-limit.ps1 -Game "D:\Games\StellarBlade")
 param([string]$Game)
-if (-not $Game) { $Game = Read-Host "Path to the StellarBlade\SB folder (contains Binaries and Content)" }
-$ue4ss = Join-Path $Game "Binaries\Win64\ue4ss"
-if (-not (Test-Path $ue4ss)) { Write-Host "UE4SS not found at $ue4ss - install UE4SS first."; exit 1 }
-$dest = Join-Path $ue4ss "Mods\AToolSlotLimit"
-New-Item -ItemType Directory -Force $dest | Out-Null
-Copy-Item -Recurse -Force (Join-Path $PSScriptRoot "AToolSlotLimit\*") $dest
-Write-Host "Installed to $dest. Edit config.txt (limit=9999) to change the limit. Remove the folder to uninstall."
+$ErrorActionPreference = "Stop"
+try {
+    if (-not $Game) { $Game = Read-Host "Path to the StellarBlade folder (the one that contains SB)" }
+    $Game = $Game.Trim().Trim('"')
+    $root = if (Test-Path (Join-Path $Game "SB\Binaries")) { Join-Path $Game "SB" } else { $Game }
+    $win64 = Join-Path $root "Binaries\Win64"
+    $mods = @((Join-Path $win64 "ue4ss\Mods"), (Join-Path $win64 "Mods")) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $mods) { throw "UE4SS Mods folder not found under $win64 - install UE4SS first." }
+    $src = Join-Path $PSScriptRoot "AToolSlotLimit"
+    if (-not (Test-Path (Join-Path $src "dlls\main.dll"))) { throw "AToolSlotLimit\dlls\main.dll is missing from this package." }
+    $dest = Join-Path $mods "AToolSlotLimit"
+    New-Item -ItemType Directory -Force (Join-Path $dest "dlls") | Out-Null
+    Copy-Item -Force (Join-Path $src "dlls\main.dll") (Join-Path $dest "dlls\main.dll")
+    foreach ($f in "enabled.txt", "config.txt") {                      # never overwrite the user's own settings
+        if (-not (Test-Path (Join-Path $dest $f))) { Copy-Item (Join-Path $src $f) (Join-Path $dest $f) }
+    }
+    if (-not (Test-Path (Join-Path $dest "dlls\main.dll"))) { throw "copy failed" }
+    Write-Host "Installed to $dest"
+    Write-Host "Settings: config.txt (limit=9999), enabled.txt (1 = on, 0 = off). Delete the folder to uninstall."
+    Write-Host "This DLL is built against one UE4SS build; if the game crashes at launch, delete the folder."
+} catch {
+    Write-Host "Not installed: $($_.Exception.Message)  (close the game first if a file is locked)"
+    exit 1
+}
