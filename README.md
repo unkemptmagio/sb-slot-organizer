@@ -3,6 +3,8 @@
 Pregame tool for Stellar Blade anim paks: finds every ATOOL slot (`/Game/Mods/HD-ATOOL_P/anim/<slot>`) your installed packs use,
 reports clashes, and proposes a conflict-free layout. Python 3.10, stdlib only.
 
+
+> **Tested versions.** SlotOrganizer 1.0.0 was tested on one setup: Windows 11, Stellar Blade (Steam), mods installed with Vortex, UE4SS = **RevOG SB-UE4SS 1.3**. The optional AToolSlotLimit mod (slots above 1000) is tested **only** with RevOG SB-UE4SS 1.3 (`UE4SS.dll` SHA-256 `E0CC51CE5B47D5BE82194510B0B4B4054DD15CE0322A983655A022F92D27DABE`, UE4SS.log: `v3.0.1 Beta, Git SHA 08a0733`); every other UE4SS is unsupported (a test on Chrisr0/RE-UE4SS 3.1.0-5 crashed while loading). Installs without Vortex were only tested on synthetic folders.
 ## Status (2026-11-25): v1.0.0
 Built and verified in game: `scan`, `fixids`, `moveslots`, `auto` (what a double-click does), `revert`, the `.exe` and `release.ps1` packaging. Journals, ledger and cache live in `%LOCALAPPDATA%\SlotOrganizer` for the exe (the repo folder from source). End-user text: `release-files/README-USER.txt`. Verified on a real install: 19 paks, 354 slots, ~0.5 s cached.
 Also reports IoStore container-ID clashes (u64 at TOC offset 56): when two paks share an id only one mounts and the other's clips never load. Verified 2026-11-25 on a real install: ESAP (slots 700-709) clashes with Death Expression and OldDroid (307-311) with GildedRoseDress Part2, which is why their clips were missing from ATOOL's list. That, not the slot number, is the real cause of most 'clip unavailable' cases.
@@ -13,7 +15,7 @@ Moving a third-party clip means rewriting the IoStore container (slot numbers ar
 
 ## Exe (built 2026-11-25)
 `dist/SlotOrganizer.exe` (PyInstaller one-file, ~5.6 MB, not committed; build it with `release.ps1`): double-click = `auto` (find the game, list container-id and slot clashes, ask, apply, wait). Terminal: `SlotOrganizer.exe scan|moveslots|fixids|auto|revert`, `--yes` skips the question. Some antivirus tools flag unsigned one-file exes.
-Slot ceiling is automatic: 1000, or the `limit=` of the AToolSlotLimit mod when it is installed, enabled and the UE4SS build is verified in game (RevOG SB-UE4SS 1.3 today; the Chrisr0 3.1.0-x build exists but is untested) (`--ceiling N` overrides). `reserved.txt` (one slot or range per line, `#` comments; default 901-907) keeps slots out of `plan`.
+Slot ceiling is automatic: 1000, or the `limit=` of the AToolSlotLimit mod when it is installed, enabled and the UE4SS build is RevOG SB-UE4SS 1.3 (the only tested one) (`--ceiling N` overrides). `reserved.txt` (one slot or range per line, `#` comments; default 901-907) keeps slots out of `plan`.
 
 ## Use
 ```
@@ -39,7 +41,7 @@ Lesson: a probe that called `StaticFindObject` on a non-resident path crashed th
 Not supported (reported, not guessed): digit-count changes, compressed containers, legacy `.pak`-only mods.
 ## Release
 
-`.\release.ps1` runs the tests, builds the exe, smoke-tests it and writes `release\SlotOrganizer-<version>.zip` (exe, README-USER.txt, Undo-last-run.bat, optional AToolSlotLimit with install-atool-limit.bat/.ps1). It fails closed.
+`.\release.ps1` runs the tests, builds the exe, smoke-tests it and writes `release\SlotOrganizer-<version>.zip` (exe, README-USER.txt, Undo-last-run.bat, optional AToolSlotLimit (RevOG SB-UE4SS 1.3 only) with install-atool-limit.bat/.ps1). It fails closed.
 
 ## Support log
 Every run of the exe appends to `%LOCALAPPDATA%\SlotOrganizer\logs\slotorganizer.log` (rotated at 512 KB; from source: `logs/` in the repo, git-ignored). `SlotOrganizer.exe log` prints the path and the last lines; failures print the path.

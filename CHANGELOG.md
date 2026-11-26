@@ -88,3 +88,8 @@
 
 ## Digit-count re-slot verified once in game (2026-11-25)
 - A 982 -> 1001 re-slot of a clip with partner tables (Adam + genital mesh) plays with both partners after the string-size fix (Run A2). try_rename still refuses digit-count changes; lifting that is a separate decision (one clip verified).
+
+## 1.0.0 - ship with the tested UE4SS only
+- Removed everything meant for other UE4SS builds: the Chrisr0 DLL and its installer branch, UNTESTED_UE4SS / ue4ss_untested, the two-build package layout and its release checks. The package ships ONE AToolSlotLimit DLL (RevOG SB-UE4SS 1.3), installed from AToolSlotLimit\dlls\main.dll; the installer accepts only that UE4SS.dll hash (-InstallUnverified overrides, may crash the game).
+- Chrisr0 3.1.0-5 history: the mod loaded but never patched in one run, and crashed ~2 s after registering its tick callback during the lobby load in a rerun with a diagnostic DLL; cause not analysed. Documented as unsupported.
+- Docs: a TESTED VERSIONS box at the top of README-USER.txt, the repo README, the packaged AToolSlotLimit README and docs/mod-page.md (draft of the mod page text).

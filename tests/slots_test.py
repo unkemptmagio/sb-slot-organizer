@@ -53,13 +53,9 @@ print("ok")
 # ceiling_warning: explicit --ceiling above what works, unverified build, no mod
 g2 = pathlib.Path(tempfile.mkdtemp())
 assert S.ceiling_warning(g2, 1000) is None and "may not show up" in S.ceiling_warning(g2, 2000)          # no mod: higher ceiling would be invisible
-U.write_bytes(b"other ue4ss"); assert "may not show up" in S.ceiling_warning(g, 5000) and "not one it is verified" in S.ceiling_warning(g, 1000)
-# untested-but-supported UE4SS builds: named, ceiling stays 1000
-U.write_bytes(b"chrisr0 build"); S.UNTESTED_UE4SS[hashlib.sha256(b"chrisr0 build").hexdigest().upper()] = "Chrisr0 test"
-assert S.ue4ss_untested(g) == "Chrisr0 test" and S.ue4ss_build(g, KN) is None and S.detect_ceiling(g, KN) == 1000 and "not been verified in game" in S.ceiling_warning(g, 1000)
-del S.UNTESTED_UE4SS[hashlib.sha256(b"chrisr0 build").hexdigest().upper()]                    # the fake entry must not leak into later checks
-# the installer's hash table must agree with slots.py (a typo in either would install the wrong DLL or trust the wrong build)
+U.write_bytes(b"other ue4ss"); assert "may not show up" in S.ceiling_warning(g, 5000) and "not the one it was tested with" in S.ceiling_warning(g, 1000)
+# the installer's single accepted hash must equal the one slots.py trusts (a typo in either would trust or install on the wrong build)
 import re as _re
 ps = (pathlib.Path(__file__).resolve().parent.parent / "release-files" / "install-atool-limit.ps1").read_text(encoding="utf-8")
-tab = dict(_re.findall(r'"([0-9A-F]{64})"\s*=\s*"([a-z0-9.\-]+)"', ps))
-assert set(tab) == set(S.KNOWN_UE4SS) | set(S.UNTESTED_UE4SS) and all(tab[h] == "revog-1.3" for h in S.KNOWN_UE4SS) and all(tab[h] == "chrisr0-3.1.0" for h in S.UNTESTED_UE4SS), "installer and slots.py disagree on UE4SS hashes"
+assert set(_re.findall(r'"([0-9A-F]{64})"', ps)) == set(S.KNOWN_UE4SS) and len(S.KNOWN_UE4SS) == 1, "installer and slots.py disagree on the supported UE4SS hash"
+assert not hasattr(S, "UNTESTED_UE4SS") and not hasattr(S, "ue4ss_untested")

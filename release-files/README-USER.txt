@@ -1,6 +1,24 @@
 SlotOrganizer - Stellar Blade anim slot organizer
 =================================================
 
++------------------------------------------------------------------------------------------
+|  TESTED VERSIONS - READ THIS FIRST
+|
+|  Tested on ONE setup: Windows 11 - Stellar Blade on Steam - mods installed with Vortex
+|  - UE4SS = "RevOG SB-UE4SS 1.3".
+|
+|  * SlotOrganizer itself (clash fixes + undo) does not use UE4SS at all.
+|  * The OPTIONAL AToolSlotLimit mod (slots above 1000) works ONLY with
+|        RevOG SB-UE4SS 1.3
+|        UE4SS.dll SHA-256  E0CC51CE5B47D5BE82194510B0B4B4054DD15CE0322A983655A022F92D27DABE
+|        first line of ue4ss\UE4SS.log: "UE4SS - v3.0.1 Beta #0 - Git SHA #08a0733"
+|    Every other UE4SS build is UNSUPPORTED and untested - the installer refuses it. A
+|    test on Chrisr0/RE-UE4SS 3.1.0-5 ended in a game crash during loading. Do not install
+|    the optional mod on any other UE4SS.
+|  * Not tested on a real game folder: installs without Vortex (only on synthetic test
+|    folders), Epic / GOG copies of the game.
++------------------------------------------------------------------------------------------
+
 WHAT IT DOES
 Animation mods that use the ATOOL / PEFA / PELA system each claim numbered "slots".
 When two mods claim the same slot, or two mod files share the same internal container id,
@@ -46,18 +64,16 @@ ownership is unknown on a shared slot, audio and PEFA names are copied (harmless
 files are left alone; the tool says so. A mod installed by hand that overwrites another
 mod's audio file before the first run cannot be told apart.
 
-OPTIONAL: MORE THAN 1000 SLOTS (advanced)
-ATOOL stops at slot 1000. The AToolSlotLimit mod lifts that at runtime. It is a native UE4SS mod, and
-a native mod only works with the UE4SS it was built for, so the package carries two builds:
-  * revog-1.3       for RevOG SB-UE4SS 1.3 (Nexus; UE4SS.dll SHA-256 E0CC51CE...DABE, UE4SS.log
-                    "v3.0.1 Beta ... Git SHA #08a0733"). Tested in game.
-  * chrisr0-3.1.0   for Chrisr0/RE-UE4SS 3.1.0-4, 3.1.0-5 and 3.1.0-6 (the line PEFA's readme lists;
-                    SB-UE4SS 3.1.6 is the very same file as 3.1.0-6). Built against that tree's headers; every function it needs resolves in those three UE4SS.dll files (checked with dumpbin), but it has NOT been tested in game yet. The 3.1.0-4 zip ships a different default (bUseUObjectArrayCache = true), so it is the riskiest of the three.
-install-atool-limit.bat looks at your UE4SS.dll and installs the matching build. On the Chrisr0 line
-it tells you it is untested and asks first; on any other UE4SS it refuses (-InstallUnverified overrides, and may crash the game). Never copy one build's main.dll into a different UE4SS by hand: the names would still resolve but the function tables differ.
-  * SlotOrganizer only uses slots above 1000 when the mod is installed, enabled AND your UE4SS is a
-    build verified in game; until the Chrisr0 build is, it keeps everything within 1..1000 and
-    tells you. If you force a higher --ceiling it warns that those clips would not show up in game.
+OPTIONAL: MORE THAN 1000 SLOTS (advanced) - RevOG SB-UE4SS 1.3 ONLY
+ATOOL stops at slot 1000. The AToolSlotLimit mod lifts that at runtime. It is a native UE4SS mod,
+and a native mod only works with the exact UE4SS it was built for: RevOG SB-UE4SS 1.3 (see the box
+at the top for how to recognise it: SHA-256 of ue4ss\UE4SS.dll, or the first line of UE4SS.log).
+  * Install with install-atool-limit.bat. It checks your UE4SS.dll and REFUSES anything but
+    RevOG SB-UE4SS 1.3. (-InstallUnverified overrides it; that may crash the game at launch.)
+  * If you do not use RevOG SB-UE4SS 1.3, do not use this mod: SlotOrganizer then keeps everything
+    within slots 1..1000 and tells you.
+  * SlotOrganizer only uses slots above 1000 when the mod is installed, enabled AND your UE4SS is
+    that build. If you force a higher --ceiling it warns that those clips may not show up in game.
   * It never overwrites your config.txt / enabled.txt. To remove it, delete Mods\AToolSlotLimit.
     If the game crashes at launch after installing it, delete that folder.
   * Only the current UE4SS folder layout (Win64\ue4ss\Mods) is detected by SlotOrganizer.

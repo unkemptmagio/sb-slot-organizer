@@ -13,4 +13,4 @@
 2. Compressed containers and legacy .pak mods are reported, not moved.
 3. Own-pak re-slotting through the port repo (port.py assigns slots, writes wav/names/PELA and the owner together) so the tool never has to guess for our packs.
 4. Code signing / SmartScreen, a license for public release, Nexus page text.
-5. AToolSlotLimit has two builds: RevOG SB-UE4SS 1.3 (tested in game) and Chrisr0 3.1.0-4/5/6 (= SB-UE4SS 3.1.6): built, every import resolves, NOT tested in game. To finish: run it on a Chrisr0 3.1.0-x UE4SS (back up dwmapi.dll + the ue4ss folder first), read UE4SS.log and ATOOL's list at slot 1001+, then move the three hashes from UNTESTED_UE4SS to KNOWN_UE4SS in slots.py and the installer text.
+5. AToolSlotLimit is shipped for ONE UE4SS only: RevOG SB-UE4SS 1.3 (tested in game). A second build for the Chrisr0 3.1.0 line was written and removed (2026-11-25): its first in-game run showed the mod loaded but never patched, and a rerun with a diagnostic DLL crashed during loading (cause not analysed). Other UE4SS builds stay unsupported until someone tests them.

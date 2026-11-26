@@ -39,8 +39,11 @@ License, https://docs.python.org/3/license.html; the runtime also carries zlib, 
 be distributed under any license.
 
 OPTIONAL: AToolSlotLimit
-The AToolSlotLimit folder is a separate UE4SS mod (same MIT license). It is built against the
-UE4SS C++ API (MIT, https://github.com/UE4SS-RE/RE-UE4SS) and is optional. UE4SS is Copyright (c) 2022 Narknon (MIT); the Chrisr0 fork (https://github.com/Chrisr0/RE-UE4SS), whose public headers the second DLL was compiled against, carries the same license. Supported UE4SS builds: see README-USER.txt.
+The AToolSlotLimit folder is a separate UE4SS mod (same MIT license), built against the UE4SS C++ API
+(UE4SS is Copyright (c) 2022 Narknon, MIT, https://github.com/UE4SS-RE/RE-UE4SS). It is optional and
+tested only with RevOG SB-UE4SS 1.3; see README-USER.txt.
 
 fmt
-Both AToolSlotLimit DLLs statically link the {fmt} formatting library (Copyright (c) 2012 - present, Victor Zverovich and {fmt} contributors; fmt 11.2.0 in the RevOG build, 10.2.1 in the Chrisr0 build), distributed under the MIT License, the same terms as printed above for CityHash.
+The AToolSlotLimit DLL statically links the {fmt} 11.2.0 formatting library (Copyright (c) 2012 -
+present, Victor Zverovich and {fmt} contributors), distributed under the MIT License, the same terms
+as printed above for CityHash.

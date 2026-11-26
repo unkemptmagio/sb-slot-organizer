@@ -1,4 +1,4 @@
-﻿"""Make a test copy of an anim pak at another slot (a different digit count is fine) with a fresh container id, for in-game tests.
+"""Make a test copy of an anim pak at another slot (a different digit count is fine) with a fresh container id, for in-game tests (a 982 -> 1001 copy of a clip with partner tables played with both partners in game, 2026-11-25).
 The source is only read. Usage:
   python tools/make_test_clip.py <src.utoc> <from-slot> <to-slot> <out-dir> [--name NAME]
 Writes <out-dir>/<NAME>.utoc/.ucas/.pak (NAME default <src stem>_S<to-slot>). Install it in ~mods; the original keeps working unless it holds the same slot."""
