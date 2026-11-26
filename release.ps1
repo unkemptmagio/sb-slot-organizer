@@ -12,7 +12,7 @@ if ((& .\dist\SlotOrganizer.exe --version) -ne "SlotOrganizer $ver") { throw "bu
 $dll = Join-Path $Game "Binaries\Win64\ue4ss\Mods\AToolSlotLimit\dlls\main.dll"
 if (-not (Test-Path -LiteralPath $dll)) { throw "AToolSlotLimit main.dll not found at $dll (pass -Game <SB folder>)" }
 # the packaged DLL must be exactly the tested build (RevOG SB-UE4SS 1.3); rebuilding the mod means re-testing it and updating this pin
-$pinned = "F9FF1CFE1DF2F38C73D7E39A75FD77777B6DEBB3C93A913F81FAB657DA4AFAE7"
+$pinned = "C42C8EF0AB1B1EBC16DBE62927F65CB6C600A12071D73CDC1DE15C325B7AFD76"
 if ((Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash -ne $pinned) { throw "main.dll at $dll is not the tested build ($pinned)" }
 # the packaged DLL must be the RevOG-line build (the only tested one): it imports CppUserModBase::on_cpp_mods_loaded
 $dumpbin = Get-ChildItem "C:\Program Files*\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -Last 1 -ExpandProperty FullName

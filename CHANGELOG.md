@@ -113,3 +113,7 @@ Entries are in development order; later sections are the final state (superseded
 - The log path is printed after every failure (including string error messages), not only after odd exit codes.
 - Every run logs an identity line: game folder, UE4SS build (tested or sha256), AToolSlotLimit state, slot ceiling and its source. The double-click header shows the real command; the `log` command no longer writes into the log.
 - Installer: clear message when UE4SS.dll is missing; release.ps1 requires git.
+
+## 1.0.0 - optional mod 0.2 (observability)
+- The optional AToolSlotLimit DLL is now 0.2: own log file (AToolSlotLimit.log), startup lines with the host UE4SS build and a warning if it is not RevOG SB-UE4SS 1.3, "waiting for ATOOL" with a 30 s counter, log-once for unexpected ATOOL data, exceptions in the tick callback caught and logged, a limit below 1000 raised to 1000. Patch logic unchanged. Tested in game on RevOG SB-UE4SS 1.3: patched 3 constants, re-applied after ATOOL's class was re-created, ATOOL listed the slot-1001 clip. main.dll SHA-256 C42C8EF0AB1B1EBC16DBE62927F65CB6C600A12071D73CDC1DE15C325B7AFD76 (pinned in release.ps1).
+- README-USER.txt and the packaged mod README describe the new log lines and failure signatures.
