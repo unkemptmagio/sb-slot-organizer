@@ -157,6 +157,16 @@ def detect_ceiling(game, known=None):
     except (OSError, ValueError): pass
     return max(1000, lim)                            # limit=1000 means "leave ATOOL as is"
 
+_NOTED = []
+
+def ceiling_warning(game, ceiling):
+    """a note when the ceiling in use is higher than what will work in game, or when the mod is installed but cannot be trusted"""
+    auto = detect_ceiling(game)
+    if ceiling > auto: return "warning: slots above %d only work with AToolSlotLimit loaded by a verified UE4SS (RevOG SB-UE4SS 1.3); on your setup clips moved there would NOT show up in game." % auto
+    if ceiling == 1000 and (pathlib.Path(game) / "Binaries" / "Win64" / "ue4ss" / "Mods" / "AToolSlotLimit" / "dlls" / "main.dll").is_file() and not ue4ss_build(game):
+        return "note: AToolSlotLimit is installed but your UE4SS build is not one it is verified with (RevOG SB-UE4SS 1.3, or its DLL could not be read), so slots stay within 1..1000."
+    return None
+
 def load_reserved(path):
     """reserved.txt: one slot or range (901-907) per line, # comments. Missing file -> the known fixed slots (Tachy face scenes)."""
     p = pathlib.Path(path)
@@ -580,10 +590,11 @@ def main(argv):
     ap.add_argument("--apply", action="store_true", help="fixids/moveslots: really write (default: dry run)"); ap.add_argument("--pak", help="moveslots: move this pak (path relative to Paks, e.g. ~mods/BBS_P.utoc)"); ap.add_argument("--slot", type=int, help="moveslots --pak: the slot to move"); ap.add_argument("--to", type=int, help="moveslots --pak: the target slot"); ap.add_argument("--backup", default=os.path.join(DATA, "slot_backups")); ap.add_argument("--cache", default=os.path.join(DATA, "slot_cache.json")); ap.add_argument("--no-cache", action="store_true"); ap.add_argument("--version", action="version", version="SlotOrganizer " + VERSION); ap.add_argument("--yes", action="store_true", help="apply without asking")
     a = ap.parse_args(argv)
     if a.cmd == "log":                                     # where the support log is, and its last lines
-        print(LOG_PATH or _log_default())
+        out = sys.__stdout__ or sys.stdout                      # not the tee: showing the log must not append to it
+        print(LOG_PATH or _log_default(), file=out)
         try:
-            for l in open(LOG_PATH or _log_default(), encoding="utf-8", errors="replace").read().splitlines()[-40:]: print(l)
-        except OSError: print("(no log yet)")
+            for l in open(LOG_PATH or _log_default(), encoding="utf-8", errors="replace").read().splitlines()[-40:]: print(l, file=out)
+        except OSError: print("(no log yet)", file=out)
         return 0
     if a.cmd == "revert":                                  # journals hold absolute paths: no game folder needed
         import glob
@@ -625,10 +636,10 @@ def main(argv):
         if r2 >= 2: return r2
         if os.path.isdir(a.backup) and any(os.path.basename(d).endswith(run) or run in d for d in os.listdir(a.backup)): print("\nUndo this run with: SlotOrganizer.exe revert")
         return 0
-    if a.ceiling is None:
-        a.ceiling = detect_ceiling(g)
-        if a.ceiling == 1000 and (g / "Binaries" / "Win64" / "ue4ss" / "Mods" / "AToolSlotLimit" / "dlls" / "main.dll").is_file() and not ue4ss_build(g):
-            print("note: AToolSlotLimit is installed but your UE4SS build is not one it is verified with (RevOG SB-UE4SS 1.3), so slots stay within 1..1000.")
+    if a.ceiling is None: a.ceiling = detect_ceiling(g)
+    w = ceiling_warning(g, a.ceiling)
+    if w and not _NOTED:
+        _NOTED.append(1); print(w)                         # once per run, even when auto calls main twice
     t = time.time(); inv = scan(g / "Content" / "Paks", None if a.no_cache else a.cache)
     lp = os.path.join(os.path.dirname(os.path.abspath(a.cache)), "slot_owners.json"); first_run = not os.path.exists(lp)
     ledger = ledger_update(g, inv, lp)
@@ -743,7 +754,7 @@ def _cli():
         if isinstance(e.code, str): print(e.code)
     except KeyboardInterrupt: print("interrupted"); rc = 130
     except BaseException:
-        import traceback; traceback.print_exc(); print("\nUnexpected error. Nothing is left half-done unless the line above says so; `SlotOrganizer.exe revert` undoes the last run."); rc = 1
+        import traceback; traceback.print_exc(); print("\nUnexpected error. Nothing is left half-done unless the line above says so; `SlotOrganizer.exe revert` undoes the last run." + ("\nIf you ask for help, attach this log file:\n  %s" % LOG_PATH if LOG_PATH else "")); rc = 1
     if LOG_PATH and rc not in (0, 1): print("\nSomething did not go as planned. If you ask for help, attach this log file:\n  %s" % LOG_PATH)
     if dbl and getattr(sys, "frozen", False):
         try: input("\nPress Enter to close")

@@ -63,3 +63,9 @@
 ## 1.0.0 - UE4SS compatibility check
 - Symbol comparison of AToolSlotLimit's 20 UE4SS imports: RevOG SB-UE4SS 1.3 (the installed build, UE4SS.log 'v3.0.1 Beta, Git SHA 08a0733') resolves all; SB-UE4SS 3.1.6 and Chrisr0/RE-UE4SS 3.1.0-5 each miss 5 CppUserModBase exports (on_lua_start/on_lua_stop/on_cpp_mods_loaded), so the DLL cannot load there.
 - detect_ceiling only raises the ceiling above 1000 when the installed UE4SS.dll hash is a verified build; install-atool-limit.ps1 warns on unverified builds (-Force to skip).
+
+## 1.0.0 - review of the UE4SS check
+- install-atool-limit.ps1 now fails closed without a console (empty answer = no).
+- A forced --ceiling above what will work warns that those clips would not show up; the unverified-build note prints once per run (auto calls main twice).
+- `log` prints to the real stdout so it no longer appends itself to the log; the unexpected-error message includes the log path.
+- Docs: privacy wording (paths can include your Windows user name), not-tested-in-game wording for other UE4SS builds, Chrisr0 3.1.0-5 check now cites its source and hash, PSF/bundled runtime notice, uploads-not-copies wording.

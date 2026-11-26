@@ -6,8 +6,7 @@ SlotOrganizer is licensed under the MIT License (see LICENSE).
 NOT AFFILIATED
 SlotOrganizer is an independent, unofficial community tool. It is not made by, endorsed by or
 affiliated with Shift Up, Sony, Stellar Blade, UE4SS, or the authors of ATOOL, PEFA, PELA or any
-animation mod it works with. Those names belong to their owners. The tool never copies or
-redistributes anyone's mod: it only edits files already installed on your own computer, keeps
+animation mod it works with. Those names belong to their owners. The tool never uploads or redistributes anyone's mod: it only edits (and, on a first run without a mod manager manifest, copies) files already installed on your own computer, keeps
 the originals (see README-USER.txt) and can undo every change.
 
 CITYHASH (algorithm re-implemented in iostore.py)
@@ -36,7 +35,7 @@ hash Unreal Engine uses. CityHash is distributed under the MIT License:
 
 BUNDLED RUNTIME (SlotOrganizer.exe only)
 The exe is built with PyInstaller and contains the Python runtime (Python Software Foundation
-License). PyInstaller is GPL-2.0-or-later with an exception that allows the bundled program to
+License, https://docs.python.org/3/license.html; the runtime also carries zlib, libffi, expat and the Microsoft Visual C++ runtime under their own licenses). PyInstaller is GPL-2.0-or-later with an exception that allows the bundled program to
 be distributed under any license.
 
 OPTIONAL: AToolSlotLimit

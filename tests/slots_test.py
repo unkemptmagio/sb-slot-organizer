@@ -50,3 +50,8 @@ U.write_bytes(b"fake ue4ss"); assert S.detect_ceiling(g, KN) == 5000 and S.ue4ss
 rf = g / "r.txt"; rf.write_text(NL.join(["# c", "5", "10-12 # x", "bad"]) + NL); assert S.load_reserved(rf) == {5, 10, 11, 12}
 assert S.load_reserved(g / "none.txt") == set(range(901, 908))
 print("ok")
+# ceiling_warning: explicit --ceiling above what works, unverified build, no mod
+g2 = pathlib.Path(tempfile.mkdtemp())
+assert S.ceiling_warning(g2, 1000) is None and "NOT show up" in S.ceiling_warning(g2, 2000)          # no mod: higher ceiling would be invisible
+U.write_bytes(b"other ue4ss"); assert "NOT show up" in S.ceiling_warning(g, 5000) and "not one it is verified" in S.ceiling_warning(g, 1000)
+

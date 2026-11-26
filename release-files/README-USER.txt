@@ -48,15 +48,19 @@ mod's audio file before the first run cannot be told apart.
 
 OPTIONAL: MORE THAN 1000 SLOTS (advanced)
 ATOOL stops at slot 1000. The AToolSlotLimit mod lifts that at runtime. It is a native UE4SS mod and
-is verified ONLY with  RevOG SB-UE4SS 1.3  (Nexus; UE4SS.dll SHA-256 E0CC51CE...DABE, the build
-whose UE4SS.log says "v3.0.1 Beta ... Git SHA #08a0733").
-It does NOT load on the older 3.1.x Stellar Blade builds (Chrisr0/RE-UE4SS 3.1.0-x, the one PEFA
-lists as tested, or SB-UE4SS 3.1.6): the DLL needs C++ hooks those builds do not have. On those
-builds nothing breaks - UE4SS just skips the mod - but slots above 1000 will not work.
-  * install-atool-limit.bat checks your UE4SS and warns if it is not the verified build.
+is verified ONLY with  RevOG SB-UE4SS 1.3  (Nexus; UE4SS.dll SHA-256 E0CC51CE...DABE; its UE4SS.log
+says "v3.0.1 Beta ... Git SHA #08a0733").
+It is NOT expected to load on other builds. In a symbol check (2026-11-25), SB-UE4SS 3.1.6 and the
+Chrisr0/RE-UE4SS 3.1.0-5 release (the build PEFA lists as tested; its UE4SS.dll SHA-256 starts
+458839B7) each lack 5 C++ hooks the DLL needs. UE4SS should simply skip the mod, but that was not
+tested in game; if the game crashes at launch, delete the Mods\AToolSlotLimit folder. Slots above
+1000 will not work on those builds.
+  * install-atool-limit.bat checks your UE4SS and asks before installing on an unverified build.
   * SlotOrganizer only uses slots above 1000 when the mod is installed, enabled AND your UE4SS is
-    the verified build; otherwise it keeps everything within 1..1000 and tells you.
+    the verified build; otherwise it keeps everything within 1..1000 and tells you. If you force a
+    higher --ceiling it warns that those clips would not show up in game.
   * It never overwrites your config.txt / enabled.txt. To remove it, delete Mods\AToolSlotLimit.
+  * Only the current UE4SS folder layout (Win64\ue4ss\Mods) is detected.
 WHAT IT WILL NOT DO (it reports instead of guessing)
   * legacy .pak-only mods (slot stored inside the pak) - ask the author for an IoStore build
   * compressed containers, or moving a slot to a different digit count (98 -> 100)
@@ -74,10 +78,10 @@ Every run writes a plain-text log: %LOCALAPPDATA%\SlotOrganizer\logs\slotorganiz
 (previous one: slotorganizer.log.1). The tool prints its path when a run fails. To see the path
 and the last lines:  SlotOrganizer.exe log
 When you ask for help, attach that file. It contains the paths of your game and mod folders and
-what the tool printed - read it first if that matters to you - and no passwords or personal data.
+what the tool printed - read it first if that matters to you - (paths can include your Windows user name, plus the file names of your mods) and no passwords.
 First try Undo-last-run.bat, then ask.
 
 CREDITS AND LICENSE
 SlotOrganizer is free software (MIT License, see LICENSE) and an independent community tool: it is
 not affiliated with Shift Up, ATOOL, PEFA, PELA, UE4SS or any mod author. It works with their
-formats and never copies or redistributes their files. Third-party notices: NOTICE.txt.
+formats and never uploads or redistributes their files. Third-party notices: NOTICE.txt.

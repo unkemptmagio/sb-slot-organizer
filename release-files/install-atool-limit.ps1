@@ -15,8 +15,9 @@ try {
     $have = if (Test-Path -LiteralPath $ueDll) { (Get-FileHash -LiteralPath $ueDll -Algorithm SHA256).Hash } else { "" }
     if ($have -ne $known -and -not $Force) {
         Write-Host "Your UE4SS is not the build this mod was made and tested for (RevOG SB-UE4SS 1.3)."
-        Write-Host "On other builds the mod will not load: nothing breaks, but slots above 1000 will not work, and SlotOrganizer will keep everything within 1..1000."
-        if ((Read-Host "Install anyway? [y/N]") -notmatch '^(y|yes)$') { throw "cancelled (UE4SS build not verified)" }
+        Write-Host "On other builds the mod is not expected to load (UE4SS should skip it, but this was not tested in game), slots above 1000 will not work, and SlotOrganizer will keep everything within 1..1000."
+        $ans = "" + (Read-Host "Install anyway? [y/N]")                  # no console / empty answer = no
+        if ($ans.Trim() -notmatch '^(y|yes)$') { throw "cancelled (UE4SS build not verified)" }
     }
     $src = Join-Path $PSScriptRoot "AToolSlotLimit"
     if (-not (Test-Path -LiteralPath (Join-Path $src "dlls\main.dll"))) { throw "AToolSlotLimit\dlls\main.dll is missing from this package." }
