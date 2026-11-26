@@ -1,11 +1,10 @@
 ﻿"""Scan installed Stellar Blade anim paks for ATOOL slot use. Stdlib only."""
 import struct, re, pathlib, collections, sys, os
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 HERE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
 # journals, ledger and cache live where they survive re-extracting a new release: %LOCALAPPDATA%\SlotOrganizer for the exe, the repo folder from source
 DATA = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "SlotOrganizer") if getattr(sys, "frozen", False) else HERE
 
-SLOT_RE = re.compile(r"/Game/Mods/HD-ATOOL_P/anim/(\d+)(?:a)?[/.]", re.I)
 
 def fstr(b, o):
     n = struct.unpack_from("<i", b, o)[0]; o += 4
@@ -54,7 +53,7 @@ def pak_slots(path):
     out = set()
     for p in paths:
         p = p.replace("\\", "/")
-        m = re.search(r"Mods/HD-ATOOL_P/anim/(\d+)a?/", p + "/", re.I) or re.search(r"Mods/HD-ATOOL_P/anim/(\d+)\.", p, re.I)
+        m = re.search(r"Mods/HD-ATOOL_P/anim/(\d+)a?/", p + "/", re.I) or re.search(r"Mods/HD-ATOOL_P/anim/(\d+)a?\.", p, re.I)    # 201/..., 201a/..., 201.uasset and the partner TABLE 201a.uasset (Lilly-Hug's Config pak)
         if m: out.add(int(m.group(1)))
     return out
 
@@ -92,6 +91,8 @@ def find_game(arg=None):
         if (g / "Content" / "Paks").is_dir(): return g
     return None
 
+CACHE_V = 2
+
 def scan(root, cache_file=None):
     """{pak path rel to root: sorted slots}. cache: a pak is re-read only when its size or mtime changed"""
     import json
@@ -99,8 +100,8 @@ def scan(root, cache_file=None):
     if cache_file and pathlib.Path(cache_file).exists():
         try: cache = json.loads(pathlib.Path(cache_file).read_text())
         except (OSError, ValueError): cache = {}          # corrupt cache: rebuild, never fatal
-    if not isinstance(cache, dict): cache = {}
-    inv, new, hits = {}, {}, 0
+    if not isinstance(cache, dict) or cache.get("__v") != CACHE_V: cache = {}          # older cache = older slot detection (1.0.0 could not see 201a.uasset): rebuild
+    inv, new, hits = {}, {"__v": CACHE_V}, 0
     for p in sorted(pathlib.Path(root).rglob("*")):
         e = p.suffix.lower()
         if e not in (".utoc", ".pak") or not p.is_file() or (e == ".pak" and p.with_suffix(".utoc").exists()): continue
@@ -355,21 +356,126 @@ def free_slot(old, used, ceiling, reserved):
             if 1 <= s <= ceiling and len(str(s)) == len(str(old)) and s not in used and s not in reserved: return s
     return None
 
-def plan_moves(root, inv, ceiling=1000, reserved=(), mtimes=None):
-    """-> (moves [(pak, old, new)], unresolved [(slot, paks, reasons)]). Per clash: never LogicMods; try the newer pak first, then the other; first one whose rewrite verifies wins."""
-    used = {s for v in inv.values() for s in v} | set(reserved); moves = []; unresolved = []
+def pak_pkgs(path):
+    """lower-case package names below anim/ in an IoStore container ('201', '201a', '201a/1'); None when they cannot be listed (legacy .pak, unreadable)"""
+    try: paths = utoc_paths(pathlib.Path(path).read_bytes()) if str(path).lower().endswith(".utoc") else None
+    except OSError: return None
+    if paths is None: return None
+    out = set()
+    for p in paths:
+        m = re.search(r"Mods/HD-ATOOL_P/anim/(.+?)(?:\.[A-Za-z.]+)?$", p.replace("\\", "/"), re.I)
+        if m: out.add(m.group(1).lower())
+    return out
+
+def _mod_stem(name):
+    """container file name -> the mod's name: 'HD-EVE-Lilly-Hug_ConfigAnim_P.utoc' -> 'hd-eve-lilly-hug'"""
+    s = re.sub(r"(?i)\.(utoc|pak)$", "", name); s = re.sub(r"(?i)_p$", "", s)
+    return re.sub(r"(?i)[_ -]?config(anim)?$", "", s).lower()
+
+def group_units(paks, inv, srcs=None):
+    """{unit: [container keys]}. A MOD can ship several containers for ONE slot (Lilly-Hug: main clip 201, partner clips 201a/*, partner table 201a);
+    they must move together. Unit = the Vortex source mod; else the mod's own folder (~mods/<folder>/...); else, for containers loose in ~mods,
+    the same dir + mod name with the _Config/_ConfigAnim/_P suffixes removed. A group is only trusted when its containers are complementary (no two
+    hold the same package); otherwise every container is its own unit, which is the old behaviour. Never groups legacy .pak or LogicMods with ~mods."""
+    paks = pathlib.Path(paks); srcs = sources(paks) if srcs is None else srcs; by = collections.defaultdict(list)
+    for k in sorted(inv):
+        v = srcs.get(os.path.normcase(str(paks / k))); parts = k.split("/")
+        if k.lower().endswith(".pak"): u = "pak:" + k                                      # legacy: slot inside the pak, never grouped
+        elif v: u = "vortex:%s|%s" % (v, parts[0].lower())                                  # one mod, but never across ~mods / LogicMods
+        elif len(parts) >= 3: u = "dir:" + "/".join(parts[:-1])
+        else: u = "flat:%s|%s" % ("/".join(parts[:-1]), _mod_stem(parts[-1]))
+        by[u].append(k)
+    out = {}; group_units.notes = []
+    def complementary(ks):
+        seen = set()
+        for k in ks:
+            ps = pak_pkgs(paks / k)
+            if ps is None or seen & ps: return False
+            seen |= ps
+        return True
+    for u, ks in by.items():
+        if len(ks) == 1: out["single:" + ks[0]] = ks; continue
+        # containers of one folder / Vortex mod belong together only when they share a SLOT (main 201 + partner 201a/* + table 201a); a mod pack holding
+        # unrelated clips (Hug + something on 305) is not one mod. Connected components over "holds a common slot".
+        comp = []
+        for k in ks:
+            hit = [c for c in comp if any(set(inv[k]) & set(inv[x]) for x in c)]
+            merged = [k] + [x for c in hit for x in c]; comp = [c for c in comp if c not in hit] + [merged]
+        for n, c0 in enumerate(comp):
+            c = sorted(c0); suffix = "" if len(comp) == 1 else "#%s~%d" % (_mod_stem(c[0].rsplit("/", 1)[-1]), n)
+            if len(c) == 1: out["single:" + c[0]] = c
+            elif complementary(c): out[u + suffix] = c
+            else:                                          # share a package (or unreadable): a mod + a rival in one folder -> split by mod name, trust a name group only if complementary
+                sub = collections.defaultdict(list)
+                for k in c: sub[_mod_stem(k.rsplit("/", 1)[-1])].append(k)
+                for m_, (stem, sk) in enumerate(sub.items()):
+                    if len(sk) > 1 and complementary(sk): out["%s#%s~%d.%d" % (u, stem, n, m_)] = sk       # n.m: never collides with another component / stem of the same folder
+                    else: out.update({"single:" + k: [k] for k in sk})
+                group_units.notes.append("%s: %d containers share a package or cannot be read, split by mod name into %d group(s)" % (u.split(":", 1)[1], len(c), len(sub)))
+    miss = [k for k in sorted(inv) if not any(k in ks for ks in out.values())]        # every container is in exactly one unit; never drop one silently
+    for k in miss: out["single:" + k] = [k]; group_units.notes.append("internal: %s was in no group, treated alone" % k)
+    return out
+
+def unit_label(unit, keys):
+    if len(keys) == 1: return keys[0]
+    if unit.startswith("flat:"): d = keys[0].rsplit("/", 1)[0] if "/" in keys[0] else ""; base = (d + "/" if d else "") + unit.split("|")[1].split("#")[0]
+    else: base = unit.split(":", 1)[1].split("|")[0].split("#")[0] + ("#" + unit.split("#", 1)[1].rsplit("~", 1)[0] if "#" in unit else "")
+    return "%s (%d containers)" % (base, len(keys))
+
+def unit_inv(inv, units):
+    """{representative container key: slots held by the whole unit} - what clash detection and the ownership ledger work on"""
+    return {ks[0]: sorted({s for k in ks for s in inv[k]}) for ks in units.values()}
+
+def slot_refusal(root, inv, units, slot, us):
+    """None when the holders `us` (units) of `slot` may be separated, else the reason. Used by the automatic plan AND by --pak, so no path can strand a pair.
+    Every holder must own the MAIN clip (package `<slot>`): a holder with only `<slot>a` / `<slot>a/*` is the partner part of some other mod's clip (an
+    addon, or half a mod that could not be grouped); moving it or its neighbour would strand the pair. A holder whose packages cannot be listed (legacy
+    .pak, unreadable) next to a holder with partner packages cannot be told apart from a partner either: refused as well."""
+    pk = {}
+    for u in us:
+        out = set()
+        for k in units[u]:
+            if slot not in inv[k]: continue
+            ps = pak_pkgs(pathlib.Path(root) / k)
+            if ps is None: out = None; break
+            out |= {p for p in ps if re.match(r"^%d(a)?(/.*)?$" % slot, p)}
+        pk[u] = out
+    lb = lambda u: unit_label(u, units[u])
+    nomain = [u for u in us if pk[u] is not None and not any(p == str(slot) or p.startswith("%d/" % slot) for p in pk[u])]
+    if nomain: return "%s holds only the partner part of slot %d (%s) without its main clip: a main clip and its partner parts are split across mods or containers, nothing moved" % (lb(nomain[0]), slot, ", ".join(sorted(pk[nomain[0]])) or "-")
+    unknown = [u for u in us if pk[u] is None]
+    if unknown and any(pk[u] and any(re.match(r"^%da" % slot, p) for p in pk[u]) for u in us if pk[u] is not None):
+        return "%s cannot be read (legacy .pak or unreadable) while another holder of slot %d has partner packages: cannot tell whether it is the partner's main clip, nothing moved" % (lb(unknown[0]), slot)
+    return None
+
+def plan_unit_moves(root, inv, ceiling=1000, reserved=(), mtimes=None, units=None):
+    """-> (moves [{unit, keys, old, new}], unresolved [(slot, [unit labels], reasons)]). A clash is between different units. Per clash: never LogicMods;
+    try the newer unit first, then the other; a unit moves only if EVERY one of its containers holding the slot rewrites and verifies (all or nothing)."""
+    units = units or {"single:" + k: [k] for k in inv}; used = {s for v in inv.values() for s in v} | set(reserved); moves = []; unresolved = []
     mt = mtimes or {k: (pathlib.Path(root) / k).stat().st_mtime for k in inv}
-    for slot, paks in sorted(clashes(inv).items()):
-        cand = sorted([k for k in paks if not k.lower().startswith("logicmods/")], key=lambda k: -mt.get(k, 0)); reasons = []; remaining = list(paks)
-        for k in cand:                                   # newest first; the last holder left keeps the slot
+    holds = {u: sorted({s for k in ks for s in inv[k]}) for u, ks in units.items()}
+    for slot, us in sorted(clashes(holds).items()):
+        why0 = slot_refusal(root, inv, units, slot, us)
+        if why0: unresolved.append((slot, [unit_label(u, units[u]) for u in us], [why0])); continue
+        cand = sorted([u for u in us if not any(k.lower().startswith("logicmods/") for k in units[u])], key=lambda u: (-max(mt.get(k, 0) for k in units[u] if slot in inv[k]), u))
+        reasons = []; remaining = list(us)
+        for u in cand:                                   # newest first; the last holder left keeps the slot
             if len(remaining) == 1: break
             new = free_slot(slot, used, ceiling, reserved)
-            if new is None: reasons.append("%s: no free slot <= %d" % (k, ceiling)); continue
-            c, why = try_rename(root, k, slot, new)
-            if c is None: reasons.append("%s: %s" % (k, why)); continue
-            moves.append((k, slot, new)); used.add(new); remaining.remove(k)
-        if len(remaining) > 1: unresolved.append((slot, remaining, reasons or ["only LogicMods packs involved"]))
+            if new is None: reasons.append("%s: no free slot <= %d" % (unit_label(u, units[u]), ceiling)); continue
+            ks = [k for k in units[u] if slot in inv[k]]; why = None
+            for k in ks:                                 # dry run of every container before anything is written
+                c, w = try_rename(root, k, slot, new)
+                if c is None: why = "%s: %s" % (k, w); break
+            if why: reasons.append("%s not moved, %s" % (unit_label(u, units[u]), why)); continue
+            moves.append({"unit": u, "keys": ks, "old": slot, "new": new}); used.add(new); remaining.remove(u)
+        if len(remaining) > 1: unresolved.append((slot, [unit_label(u, units[u]) for u in remaining], reasons or ["only LogicMods packs involved"]))
     return moves, unresolved
+
+def plan_moves(root, inv, ceiling=1000, reserved=(), mtimes=None):
+    """-> (moves [(pak, old, new)], unresolved [(slot, paks, reasons)]): the same plan with every container its own unit (no grouping)."""
+    mv, un = plan_unit_moves(root, inv, ceiling, reserved, mtimes)
+    return [(m["keys"][0], m["old"], m["new"]) for m in mv], un
 
 def sources(paks):
     """{normalized absolute path: source mod} from Vortex deployment manifests under Paks (empty if Vortex is not used)"""
@@ -404,7 +510,12 @@ def _pela_slots(doc):
             for x in o: walk(x)
     walk(doc); return out
 
-def ledger_update(game, inv, path):
+_SAID = set()
+def _once(msg):
+    """print a line once per process (auto runs main twice)"""
+    if msg not in _SAID: _SAID.add(msg); print(msg)
+
+def ledger_update(game, inv, path, alias=None):
     """First-sight ownership for installs without Vortex: while a slot is held by ONE pak, remember that pak as the owner of the slot's wav /
     PELA file (with the file's size+mtime). An entry is dropped when the file changed or its owner left the install; a changed file is
     re-recorded if its slot has a single holder. Returns {normalized path: 'pak:<key>'}."""
@@ -417,8 +528,9 @@ def ledger_update(game, inv, path):
     for k, v in inv.items():
         for sl in v: holders[sl].append(k)
     led = {}
+    alias = alias or {}                                  # 1.0.0 named an owner by its container; a mod's containers are now named by the first one
     for pth, e in old.items():                           # keep only what is still true
-        if isinstance(e, dict) and isinstance(e.get("o"), str) and e["o"][4:] in inv and e.get("s") == _sig(pth): led[pth] = e
+        if isinstance(e, dict) and isinstance(e.get("o"), str) and e["o"][:4] == "pak:" and alias.get(e["o"][4:], e["o"][4:]) in inv and e.get("s") == _sig(pth): led[pth] = {**e, "o": "pak:" + alias.get(e["o"][4:], e["o"][4:])}
     def rec(f, who): led.setdefault(os.path.normcase(str(f)), {"o": "pak:" + who, "s": _sig(f)})
     audio = game / "Content" / "Paks" / "LogicMods" / "HD-ATOOL_P" / "audio"
     for f in (audio.iterdir() if audio.is_dir() else []):
@@ -499,7 +611,7 @@ def external_files(game, old, new, apply_to=None, backup=None, shared=False, mov
             p.write_text(json.dumps(doc, indent=1), encoding="utf-8"); stp["sig"] = _sig(p); _commit(apply_to)
     return out
 
-def apply_move(root, game, key, old, new, backup, shared=False, srcs=None):
+def apply_move(root, game, key, old, new, backup, shared=False, srcs=None, ext=True, unit=None, mover=None):
     """rewrite the container of `key` (slot old -> new), swap it in, edit slot-keyed files. Every step is journaled BEFORE it happens
     (manifest rewritten atomically); any failure rolls back what was done. Returns the journal dict."""
     import iostore, shutil
@@ -513,6 +625,7 @@ def apply_move(root, game, key, old, new, backup, shared=False, srcs=None):
     if shutil.disk_usage(root).free < len(t) + len(u) + (1 << 20): raise SystemExit("not enough free disk space for the rewritten container")
     nt = utoc.with_name(utoc.name + ".new"); nu = ucas.with_name(ucas.name + ".new")        # not mountable names
     j = {"kind": "move", "pak": key, "old": old, "new": new, "steps": [], "done": False}; mp = backup / "manifest.json"
+    if unit: j["unit"] = unit
     try:
         nt.write_bytes(t); nu.write_bytes(u)
         c2 = iostore.read_container(nt, nu)                                 # verify what was written, not what we meant to write
@@ -527,7 +640,7 @@ def apply_move(root, game, key, old, new, backup, shared=False, srcs=None):
         os.replace(nt, utoc); os.replace(nu, ucas)
         steps[-2]["sig"] = _sig(utoc); steps[-1]["sig"] = _sig(ucas); _commit(steps)
         srcs = srcs if srcs is not None else sources(root)
-        j["notes"] = [w for w, _p in external_files(game, old, new, steps, backup, shared, srcs.get(os.path.normcase(str(utoc))) or "pak:" + key, srcs)]
+        if ext: j["notes"] = [w for w, _p in external_files(game, old, new, steps, backup, shared, mover or srcs.get(os.path.normcase(str(utoc))) or "pak:" + key, srcs)]
         j["done"] = True; _save_manifest(mp, j)
     except BaseException:
         for x in (nt, nu):
@@ -536,6 +649,33 @@ def apply_move(root, game, key, old, new, backup, shared=False, srcs=None):
         if mp.exists(): revert_move(backup)                             # roll back whatever was already done
         raise
     return j
+
+def apply_unit_move(root, game, keys, old, new, backups, shared=False, srcs=None, unit=None, mover=None):
+    """move every container of one mod (slot old -> new) as ONE unit: each container is journaled and verified like a single move; the slot-keyed
+    files (wav / PEFA names / PELA) are handled once, with the first container (owner = `mover`, the same identity the preview used); if any container
+    fails, the ones already moved are reverted, so the mod is never left half moved (main clip on the new slot, partner on the old one = the mod's
+    second character disappears). A crash or kill between containers is covered by START MARKERS: every container's journal exists, unfinished
+    (done=false), before the first byte is written, so interrupted() sees the whole unit and `revert` undoes what was done. After the last move every
+    container is re-read: all must report `new` and none `old`. apply_unit_move.clean says whether a failure was rolled back completely."""
+    root = pathlib.Path(root); js = []; apply_unit_move.clean = True
+    try:
+        for k, bk in zip(keys, backups):               # inside the try: a marker that cannot be written must not leave the earlier ones behind
+            pathlib.Path(bk).mkdir(parents=True, exist_ok=True)
+            _save_manifest(pathlib.Path(bk) / "manifest.json", {"kind": "move", "pak": k, "old": old, "new": new, "steps": [], "done": False, **({"unit": unit} if unit else {})})
+        for i, (k, bk) in enumerate(zip(keys, backups)):
+            js.append(apply_move(root, game, k, old, new, bk, shared=shared, srcs=srcs, ext=(i == 0), unit=unit, mover=mover))
+        for k in keys:
+            s = pak_slots(root / k)
+            if new not in s or old in s: raise SystemExit("verification failed: %s reports slots %s after the move (expected %d, not %d)" % (k, sorted(s), new, old))
+    except BaseException:
+        for bk in reversed(backups):                    # the failing container rolled itself back already; reverting it (and the untouched markers) again is harmless
+            try:
+                revert_move.kept = 0; revert_move(bk)
+                if revert_move.kept: apply_unit_move.clean = False; print("  NOT fully undone: %d step(s) of %s were kept (files changed since)" % (revert_move.kept, bk))
+                if (pathlib.Path(bk) / "manifest.partial.json").exists(): apply_unit_move.clean = False; print("  NOT fully undone: %s was kept as manifest.partial.json (apply_move's own rollback could not undo everything)" % bk)
+            except Exception as e: apply_unit_move.clean = False; print("  could not revert %s: %s" % (bk, e))
+        raise
+    return js
 
 def revert_move(backup):
     """undo a move journal: put the original files back, newest step first. Tolerates steps that never happened and repeated calls.
@@ -589,10 +729,15 @@ def interrupted(backup):
     import glob, json
     out = []
     for d in glob.glob(glob.escape(backup) + "/move-*") + glob.glob(glob.escape(backup) + "/ids-*"):
-        try:
-            if json.loads(open(d + "/manifest.json", encoding="utf-8").read()).get("done") is False: out.append(d)       # journals from before this flag existed are not flagged
-        except (OSError, ValueError): pass
+        for name in ("manifest.json", "manifest.partial.json"):       # .partial = a failed move whose own rollback could not undo everything (a file changed meanwhile)
+            try:
+                if json.loads(open(d + "/" + name, encoding="utf-8").read()).get("done") is False: out.append(d); break       # journals from before this flag existed are not flagged
+            except (OSError, ValueError): pass
     return out
+
+def partial_pending(dirs):
+    """the unfinished journals that are NOT revertible any more (manifest.partial.json): reverting would only touch older runs"""
+    return [d for d in dirs if os.path.exists(os.path.join(d, "manifest.partial.json")) and not os.path.exists(os.path.join(d, "manifest.json"))]
 
 def sweep_temp(paks):
     """remove temp containers a killed run may have left in Paks (they would be mounted by the game); returns the removed names"""
@@ -623,6 +768,8 @@ def main(argv):
     if a.cmd == "revert":                                  # journals hold absolute paths: no game folder needed
         import glob
         if _game_running(): print("Stellar Blade is running: close it first"); return 2
+        pp0 = partial_pending(interrupted(a.backup))
+        if pp0: print("A failed move could not be undone completely (%s): revert cannot fix it and would only undo OLDER runs, so it does nothing. The originals are in that journal folder under %s and as *.orig files next to the paks; send the log. Once the files are checked, delete that journal folder to clear this warning." % (", ".join(os.path.basename(d) for d in pp0), a.backup)); return 2
         ds = [d for d in glob.glob(glob.escape(a.backup) + "/ids-*") + glob.glob(glob.escape(a.backup) + "/move-*") if os.path.exists(d + "/manifest.json")]
         if not ds: print("nothing to revert in", a.backup); return 0
         ts = lambda d: re.search(r"(\d{8}-\d{6})", os.path.basename(d)).group(1)
@@ -668,15 +815,26 @@ def main(argv):
         _NOTED.append(1); print(w)                         # once per run, even when auto calls main twice
     t = time.time(); inv = scan(g / "Content" / "Paks", None if a.no_cache else a.cache)
     lp = os.path.join(os.path.dirname(os.path.abspath(a.cache)), "slot_owners.json"); first_run = not os.path.exists(lp)
-    ledger = ledger_update(g, inv, lp)
-    ss = {s for v in inv.values() for s in v}; cl = clashes(inv)
+    vsrc = sources(g / "Content" / "Paks"); units = group_units(g / "Content" / "Paks", inv, vsrc); uinv = unit_inv(inv, units)       # a mod's containers = ONE unit (Lilly-Hug is 3)
+    lab = {ks[0]: unit_label(u, ks) for u, ks in units.items()}; rep = {k: ks[0] for ks in units.values() for k in ks}
+    for n_ in group_units.notes: _once("note: " + n_)
+    for u_, ks_ in sorted(units.items()):
+        if len(ks_) > 1: _once("mod %s = %s" % (unit_label(u_, ks_), ", ".join(os.path.basename(k) for k in ks_)))        # what was grouped (support log), every run
+    ledger = ledger_update(g, uinv, lp, rep)
+    ss = {s for v in inv.values() for s in v}; cl = {s: [lab[k] for k in ks] for s, ks in clashes(uinv).items()}
     print("%d paks, %d slots, %d clashes, %d above %d, %d free <= %d  (%d cached, %.2fs)" % (len(inv), len(ss), len(cl), sum(s > a.ceiling for s in ss), a.ceiling, a.ceiling - len([s for s in ss if s <= a.ceiling]), a.ceiling, scan.hits, time.time() - t))
-    for s, p in sorted(cl.items()): print("  clash slot %d: %s" % (s, " | ".join(p)))
+    members = {unit_label(u, ks): ks for u, ks in units.items() if len(ks) > 1}
+    for s, p in sorted(cl.items()):
+        print("  clash slot %d: %s" % (s, " | ".join(p)))
+        for lb_ in p:
+            if lb_ in members: print("      %s = %s" % (lb_, ", ".join(os.path.basename(k) for k in members[lb_])))      # what was grouped (support log)
     idc = id_clashes(g / "Content" / "Paks"); anim = {k.replace("\\", "/") for k in inv}
     hit = {v: ks for v, ks in idc.items() if any(k in anim for k in ks)}
     if hit: print("%d container-id clash(es) involve anim paks (only one pak per id mounts, the other one's clips are unavailable)" % len(hit))
     iv = interrupted(a.backup)
-    if iv: print("WARNING: an interrupted run was found (%s). Run Undo-last-run.bat (or SlotOrganizer.exe revert) before changing anything." % ", ".join(os.path.basename(d) for d in iv))
+    pp = partial_pending(iv)
+    if iv and len(pp) < len(iv): print("WARNING: an interrupted run was found (%s). Run Undo-last-run.bat (or SlotOrganizer.exe revert) before changing anything." % ", ".join(os.path.basename(d) for d in iv if d not in pp))
+    if pp: print("WARNING: a failed move could not be undone completely (%s). Do NOT run revert (it cannot fix this and would only undo older runs). The originals are in that journal folder under %s and as *.orig files next to the paks; send the log. Once the files are checked, delete that journal folder to clear this warning." % (", ".join(os.path.basename(d) for d in pp), a.backup))
     for v, ks in hit.items(): print("  id %#x: %s" % (v, " | ".join(ks)))
     cl = {**cl, **{("id", v): ks for v, ks in hit.items()}}
     if a.cmd == "fixids":
@@ -703,38 +861,53 @@ def main(argv):
             if kk not in inv: print("--pak %s is not an anim pak under %s (use the path shown by scan)" % (a.pak, paks)); return 2
             used = {x for v in inv.values() for x in v}
             if not (1 <= a.to <= a.ceiling) or a.to in rs or a.to in used: print("--to %d is not a free slot within 1..%d" % (a.to, a.ceiling)); return 2
-            c0, why0 = try_rename(paks, kk, a.slot, a.to)
-            if c0 is None: print("cannot move %s: %s" % (kk, why0)); return 2
-            moves, unresolved = [(kk, a.slot, a.to)], []
-        else: moves, unresolved = plan_moves(paks, inv, a.ceiling, rs)
+            if a.slot not in inv[kk]: print("%s does not hold slot %d (it holds %s)" % (kk, a.slot, ", ".join(map(str, inv[kk])))); return 2
+            uk = next((u for u, ks in units.items() if kk in ks), None); ks = [k for k in units.get(uk, []) if a.slot in inv[k]]      # the whole mod moves, not one container
+            if not ks: print("%s is not part of any mod group (internal error, see log)" % kk); return 2
+            why_ = slot_refusal(paks, inv, units, a.slot, [u for u, ks2 in units.items() if any(a.slot in inv[k] for k in ks2)])        # same guard as the automatic plan
+            if why_: print("cannot move %s: %s" % (kk, why_)); return 2
+            for k in ks:
+                c0, why0 = try_rename(paks, k, a.slot, a.to)
+                if c0 is None: print("cannot move %s: %s" % (k, why0)); return 2
+            moves, unresolved = [{"unit": uk, "keys": ks, "old": a.slot, "new": a.to}], []
+        else: moves, unresolved = plan_unit_moves(paks, inv, a.ceiling, rs, units=units)
         for slot, ps, why in unresolved:
             print("  slot %d cannot be fixed automatically (%s):" % (slot, " | ".join(ps)))
             for w in why: print("      " + w)
-        srcs = {**ledger, **sources(paks)}                      # Vortex's word beats the ledger
-        def shared(k, o): return any(o in v for kk, v in inv.items() if kk != k)
-        def mover(k): return srcs.get(os.path.normcase(str(paks / k))) or "pak:" + k
-        if moves and first_run and not sources(paks): print("  note: first run without a mod manager manifest - who owns each slot's audio/PELA files is unknown, so those are copied, not moved. Run the tool once on a clean install, then after each install, to keep ownership exact.")
-        for k, o, n in moves:
-            print("  %s: slot %d -> %d" % (k, o, n))
-            for what, _p in external_files(g, o, n, shared=shared(k, o), mover=mover(k), srcs=srcs): print("      " + what)
+        srcs = {**ledger, **vsrc}                               # Vortex's word beats the ledger
+        def shared(mv): return any(mv["old"] in v for r, v in uinv.items() if r != units[mv["unit"]][0])      # held by ANOTHER mod
+        def mover(k): return srcs.get(os.path.normcase(str(paks / k))) or "pak:" + rep[k]                     # the ledger names a mod by its first container
+        if moves and first_run and not vsrc: print("  note: first run without a mod manager manifest - who owns each slot's audio/PELA files is unknown, so those are copied, not moved. Run the tool once on a clean install, then after each install, to keep ownership exact.")
+        for mv in moves:
+            ks = mv["keys"]; lb = unit_label(mv["unit"], units[mv["unit"]])
+            print("  %s: slot %d -> %d%s" % (lb, mv["old"], mv["new"], " (%d containers moved together: %s)" % (len(ks), ", ".join(os.path.basename(k) for k in ks)) if len(ks) > 1 else ""))
+            for what, _p in external_files(g, mv["old"], mv["new"], shared=shared(mv), mover=mover(ks[0]), srcs=srcs): print("      " + what)
         if not moves: print("nothing to move"); return 1 if unresolved else 0
-        if not a.apply: print("dry run: %d move(s) (add --apply, close the game first)" % len(moves)); return 1
+        nc_ = sum(len(m["keys"]) for m in moves)
+        if not a.apply: print("dry run: %d move(s), %d container(s) (add --apply, close the game first)" % (len(moves), nc_)); return 1
         if _game_running(): print("Stellar Blade is running: close it first"); return 2
         if iv: print("not applying while an interrupted run is pending"); return 2
         if not a.yes and not _ask("Move %d slot(s) now? (originals are kept as .orig, `revert` undoes it)" % len(moves)): print("cancelled, nothing changed"); return 1
         if _game_running(): print("Stellar Blade was started meanwhile: close it first"); return 2
         sweep_temp(paks)
-        bk = "%s/move-%s" % (a.backup, a.run or _t.strftime("%Y%m%d-%H%M%S")); print("game folder:", g)
-        for i, (k, o, n_) in enumerate(moves):
-            try: jn = apply_move(paks, g, k, o, n_, "%s-%d" % (bk, i), shared=shared(k, o), srcs=srcs)
+        bk = "%s/move-%s" % (a.backup, a.run or _t.strftime("%Y%m%d-%H%M%S")); print("game folder:", g); i = 0
+        for n_done, mv in enumerate(moves):
+            bks = ["%s-%d" % (bk, i + x) for x in range(len(mv["keys"]))]; i += len(bks)
+            try: js = apply_unit_move(paks, g, mv["keys"], mv["old"], mv["new"], bks, shared=shared(mv), srcs=srcs, unit=unit_label(mv["unit"], units[mv["unit"]]), mover=mover(mv["keys"][0]))
             except BaseException:
-                if i: print("%d of %d move(s) were applied before this failure; `revert` undoes them (the failed one was rolled back already)" % (i, len(moves)))
+                lb_ = unit_label(mv["unit"], units[mv["unit"]])
+                if apply_unit_move.clean: print("move of %s failed and was rolled back completely (all %d container(s) of it); see the log" % (lb_, len(mv["keys"])))
+                else: print("move of %s failed and was NOT fully rolled back: it may be half moved. Do NOT run revert; the originals are in the journal folders under %s and as *.orig files next to the paks. Send the log. The next run refuses to change anything until this is sorted out." % (lb_, a.backup))
+                if n_done: print("%d earlier move(s) of this run were applied; `revert` undoes them" % n_done)
                 raise
-            for w in jn.get("notes", []): print("      " + w)
-        print("moved %d slot(s); undo with: SlotOrganizer.exe revert (journal %s-*)" % (len(moves), bk)); return 0
+            for j in js:
+                for w in j.get("notes", []): print("      " + w)
+            print("  verified: %s now on slot %d (%d container(s))" % (unit_label(mv["unit"], units[mv["unit"]]), mv["new"], len(mv["keys"])))
+        print("moved %d slot(s) (%d container(s)); undo with: SlotOrganizer.exe revert (journal %s-*)" % (len(moves), nc_, bk)); return 0
     if a.cmd == "plan":
-        mv = plan(inv, a.ceiling, reserved=load_reserved(a.reserved))
-        for k, o, n in mv: print("  %s: %d -> %d" % (k, o, n))
+        mv, unres = plan_unit_moves(g / "Content" / "Paks", inv, a.ceiling, load_reserved(a.reserved), units=units)       # the very planner moveslots uses (per mod, with its refusals)
+        for m in mv: print("  %s: %d -> %d" % (unit_label(m["unit"], units[m["unit"]]), m["old"], m["new"]))
+        for slot, ps, why in unres: print("  slot %d cannot be fixed automatically (%s): %s" % (slot, " | ".join(ps), "; ".join(why)))
         print("%d moves proposed (nothing is changed on disk yet)" % len(mv))
     return 1 if cl else 0
 

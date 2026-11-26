@@ -23,6 +23,28 @@ def make_pak(d, name, slot, cid=0x1122334455667788, extra=b"", dirs_in_mount=Tru
     t, u = I.container_bytes(c); (d / (name + ".utoc")).write_bytes(t); (d / (name + ".ucas")).write_bytes(u)
     return d / (name + ".utoc")
 
+def make_multi(d, name, files, mount="../../../SB/Content/Mods/HD-ATOOL_P/anim/", cid=0x1122334455667788):
+    """several clip packages in one container. files = [(package path, file name relative to the mount point)], e.g. Lilly-Hug's partner pak:
+    mount '.../anim/201a/' with ('/Game/Mods/HD-ATOOL_P/anim/201a/1', '1.uasset') ... (the slot folder lives in the mount point, not in a directory entry)"""
+    n = len(files); pks = []; chunks = []
+    mk = lambda i, t, dta: dict(id=i, index=0, pad=0, type=t, data=dta, meta_flags=0, meta_pad=bytes(12), meta_hash=b"", sha_ok=True, dirty=False)
+    for pkg, _f in files:
+        names = ["/Engine/Animation/Foo", pkg, pkg.rsplit("/", 1)[1], "Class", "AnimSequence"]
+        p = I.Package(); p.name_idx, p.name_no, p.src_idx, p.src_no, p.flags, p.pad = 1, 0, 1, 0, 0x80000000, 0
+        p.names = [(x, False) for x in names]; p.algo = 0xc1640000; p.hashes = [I.name_hash(x) for x in names]
+        blob = bytes(range(256)) * 4
+        p.cooked_hdr = 1000; p.imports = bytes(16); p.exports = [[1000, len(blob), 2, 0, 2**64 - 1, 7, 2**64 - 1, 9, 11, 0, 0, 0, 0, 0]]
+        p.bundles = bytes(24); p.graph = bytes(8); p.blobs = [blob]
+        data = I.package_bytes(p); pks.append((I.package_id(pkg), data))
+    hdr = struct.pack("<QII", cid, n, 0) + struct.pack("<I", 8) + struct.pack("<Q", 0xc1640000) + struct.pack("<I", n) + b"".join(struct.pack("<Q", pid) for pid, _ in pks)
+    hdr += struct.pack("<I", 32 * n) + b"".join(struct.pack("<QIIIIII", len(dta), 1, 1, 0, 0, 0, 0) for _, dta in pks) + struct.pack("<II", 0, 0)
+    h = bytearray(144); h[:16] = I.MAGIC; h[16] = 2; struct.pack_into("<IIIIIII", h, 20, 144, 2, 2, 12, 0, 32, 65536); h[80] = 8
+    c = I.Container(); c.header = h; c.block_size = 65536; c.container_id = cid; c.block_align = 16
+    c.chunks = [mk(cid, 10, hdr)] + [mk(pid, 2, dta) for pid, dta in pks]
+    c.dirindex = dict(mount=mount, mount_kind=1, dirs=[[0xFFFFFFFF] * 3 + [n - 1]], files=[[i, i - 1 if i else 0xFFFFFFFF, i + 1] for i in range(n)], strings=[f for _p, f in files], kinds=[1] * n)
+    t, u = I.container_bytes(c); (d / (name + ".utoc")).write_bytes(t); (d / (name + ".ucas")).write_bytes(u)
+    return d / (name + ".utoc")
+
 tmp = pathlib.Path(tempfile.mkdtemp())
 
 # hash proof against a real pak (skipped without the game files)
@@ -48,6 +70,26 @@ for new in (983, 1001, 99):
     assert I.read_package(c2.chunks[1]["data"]).blobs == I.read_package(I.read_container(a).chunks[1]["data"]).blobs   # the clip data is untouched
 try: I.rename_slot(I.read_container(a), 5, 6); assert 0
 except I.Unsupported: pass
+
+# Lilly-Hug shapes: partner clips with the slot folder in the MOUNT POINT, and the partner table as a top-level <slot>a.uasset
+A = "/Game/Mods/HD-ATOOL_P/anim/"
+def _roundtrip(path, old, new):
+    c = I.read_container(path); assert not I.check_container(c), I.check_container(c)
+    I.rename_slot(c, old, new); assert not I.check_container(c), I.check_container(c)
+    t, u = I.container_bytes(c); (tmp / "y.utoc").write_bytes(t); (tmp / "y.ucas").write_bytes(u)
+    c2 = I.read_container(tmp / "y.utoc", tmp / "y.ucas"); assert not I.check_container(c2), I.check_container(c2)
+    return c, c2, len(t) == len(path.read_bytes())
+ca = make_multi(tmp, "hug_anim", [(A + "201a/%d" % i, "%d.uasset" % i) for i in (1, 2, 3, 4)], mount="../../../SB/Content/Mods/HD-ATOOL_P/anim/201a/")
+_c, c2, same = _roundtrip(ca, 201, 202)
+assert same and c2.dirindex["mount"].endswith("/anim/202a/") and sorted(I.slots_in(c2)) == [202] and sorted(I.slots_in(c2)[202]) == [A + "202a/%d" % i for i in (1, 2, 3, 4)]
+_c, c2, _s = _roundtrip(ca, 201, 1001); assert c2.dirindex["mount"].endswith("/anim/1001a/") and sorted(I.slots_in(c2)) == [1001]          # digit count may change at this layer
+cn = make_multi(tmp, "hug_n", [(A + "201/%d" % i, "%d.uasset" % i) for i in (1, 2)], mount="../../../SB/Content/Mods/HD-ATOOL_P/anim/201/")
+_c, c2, same = _roundtrip(cn, 201, 202); assert same and c2.dirindex["mount"].endswith("/anim/202/") and sorted(I.slots_in(c2)) == [202]
+co = make_multi(tmp, "other", [(A + "2010/1", "1.uasset")], mount="../../../SB/Content/Mods/HD-ATOOL_P/anim/2010/")      # 2010 is not 201: untouched by a 201 rename
+try: I.rename_slot(I.read_container(co), 201, 202); assert 0
+except I.Unsupported: pass
+ct = make_multi(tmp, "hug_table", [(A + "201a", "201a.uasset")])
+_c, c2, same = _roundtrip(ct, 201, 202); assert same and sorted(I.slots_in(c2)) == [202] and list(I.path_names(c2).values()) == [A + "202a"]
 
 # slot move on a fake Paks tree: clash planning, apply, byte-exact revert
 paks = tmp / "Paks"; (paks / "~mods").mkdir(parents=True)
@@ -237,4 +279,224 @@ S.revert_move.kept = 0; S.revert_move(tmp / "orig_bk"); assert S.revert_move.kep
 assert "attach this log file" in S._failure_footer(1, True, "x.log") and S._failure_footer(1, False, "x.log") == "" and "x.log" in S._failure_footer(2, False, "x.log") and S._failure_footer(1, True, None) == "" and S._failure_footer(0, False, "x.log") == ""
 # (d) the log records what is being looked at
 il = S.identity_line(g, 1000, False); assert str(g) in il and "UE4SS:" in il and "AToolSlotLimit:" in il and "slot ceiling 1000 (auto)" in il and "(--ceiling)" in S.identity_line(g, 5000, True)
+# ---- Lilly-Hug: ONE mod = three containers on one slot (main clip 201, partner clips 201a/* with the folder in the mount point, partner table 201a)
+def _hug(mods, folder="Hug", cid0=100, slot=201):
+    d = mods / folder if folder else mods; d.mkdir(parents=True, exist_ok=True)
+    make_multi(d, "Hug_P", [(A + "%d" % slot, "%d.uasset" % slot)], cid=cid0)
+    make_multi(d, "Hug_ConfigAnim_P", [(A + "%da/%d" % (slot, i), "%d.uasset" % i) for i in (1, 2, 3, 4)], mount="../../../SB/Content/Mods/HD-ATOOL_P/anim/%da/" % slot, cid=cid0 + 1)
+    make_multi(d, "Hug_Config_P", [(A + "%da" % slot, "%da.uasset" % slot)], cid=cid0 + 2)
+    return d
+def _hug_world(name, flat=False):
+    pk = tmp / name; mods = pk / "~mods"; mods.mkdir(parents=True)
+    _hug(mods, None if flat else "Hug", 100)
+    old = mods / "Old"; old.mkdir(); make_multi(old, "old_P", [(A + "201", "201.uasset")], cid=200)
+    for f_ in old.iterdir(): os.utime(f_, (1.6e9, 1.6e9))                                    # Old is older: Hug is the one that moves
+    for f_ in mods.rglob("Hug*"): os.utime(f_, (1.7e9, 1.7e9))
+    return pk
+hp = _hug_world("hugpaks"); hinv = S.scan(hp)
+assert {k.split("/")[-1] for k in hinv} == {"Hug_P.utoc", "Hug_ConfigAnim_P.utoc", "Hug_Config_P.utoc", "old_P.utoc"}      # the partner TABLE (201a.uasset) is seen now
+assert all(v == [201] for v in hinv.values())
+hu = S.group_units(hp, hinv, {}); assert sorted(len(v) for v in hu.values()) == [1, 3], hu                                 # 3 containers = one mod
+huinv = S.unit_inv(hinv, hu); assert list(S.clashes(huinv).keys()) == [201] and len(S.clashes(huinv)[201]) == 2                # ONE clash: Hug vs Old (not Hug vs itself)
+assert "(3 containers)" in S.unit_label(*next((u, ks) for u, ks in hu.items() if len(ks) == 3))
+mv, un = S.plan_unit_moves(hp, hinv, 1000, (), units=hu)
+assert not un and len(mv) == 1 and len(mv[0]["keys"]) == 3 and mv[0]["old"] == 201 and mv[0]["new"] == 202, (mv, un)       # all three together
+hsnap = lambda: {str(q.relative_to(hp)): hashlib.sha256(q.read_bytes()).hexdigest() for q in hp.rglob("*") if q.is_file()}
+h_before = hsnap(); calls = []; real_ext2 = S.external_files
+S.external_files = lambda *a, **k: (calls.append(1), real_ext2(*a, **k))[1]
+try: bks = [str(tmp / ("hbk%d" % i)) for i in range(3)]; js = S.apply_unit_move(hp, tmp, mv[0]["keys"], 201, 202, bks, unit="Hug")
+finally: S.external_files = real_ext2
+assert len(js) == 3 and len(calls) == 1, calls                                                          # slot-keyed files handled ONCE per mod, not once per container
+hinv2 = S.scan(hp); assert {k.split("/")[-1]: v for k, v in hinv2.items()} == {"Hug_P.utoc": [202], "Hug_ConfigAnim_P.utoc": [202], "Hug_Config_P.utoc": [202], "old_P.utoc": [201]}
+assert not S.clashes(S.unit_inv(hinv2, S.group_units(hp, hinv2, {})))
+got = {}
+for k in hinv2:
+    if "Hug" in k: got[k.split("/")[-1]] = sorted(S.pak_pkgs(hp / k))
+assert got == {"Hug_P.utoc": ["202"], "Hug_ConfigAnim_P.utoc": ["202a/1", "202a/2", "202a/3", "202a/4"], "Hug_Config_P.utoc": ["202a"]}, got   # main, partner clips AND table all on 202(a)
+assert all(json.loads((pathlib.Path(b) / "manifest.json").read_text()).get("unit") == "Hug" for b in bks)
+for b in reversed(bks): S.revert_move(b)
+assert hsnap() == h_before                                                                              # byte-exact undo of all three
+# a container that cannot be rewritten: the WHOLE mod stays put and the reason names the container
+real_try = S.try_rename
+S.try_rename = lambda root, key, old, new: (None, "synthetic refusal") if "ConfigAnim" in key else real_try(root, key, old, new)
+try: mv2, un2 = S.plan_unit_moves(hp, hinv, 1000, (), units=hu)
+finally: S.try_rename = real_try
+assert not un2 and len(mv2) == 1 and mv2[0]["keys"] == ["~mods/Old/old_P.utoc"], (mv2, un2)          # Hug stays whole, the OTHER mod gives way
+S.try_rename = lambda root, key, old, new: (None, "synthetic refusal") if ("ConfigAnim" in key or "old_P" in key) else real_try(root, key, old, new)
+try: mv2, un2 = S.plan_unit_moves(hp, hinv, 1000, (), units=hu)
+finally: S.try_rename = real_try
+assert not mv2 and un2 and "ConfigAnim_P.utoc: synthetic refusal" in " ".join(un2[0][2]) and "Hug (3 containers)" in " ".join(un2[0][1]), (mv2, un2)   # reason names the container
+# a failure on the 3rd container rolls back the first two (the mod is never left half moved)
+real_am = S.apply_move; n_calls = []
+def flaky(*a, **k):
+    n_calls.append(1)
+    if len(n_calls) == 3: raise OSError("disk full")
+    return real_am(*a, **k)
+S.apply_move = flaky
+try: S.apply_unit_move(hp, tmp, mv[0]["keys"], 201, 202, [str(tmp / ("fb%d" % i)) for i in range(3)], unit="Hug"); assert 0
+except OSError: pass
+finally: S.apply_move = real_am
+assert hsnap() == h_before, "half-moved mod left behind"
+# verification after the move catches a container that did not end up on the new slot
+real_ps = S.pak_slots; S.pak_slots = lambda path: {201} if "Config_P" in str(path) else real_ps(path)
+try: S.apply_unit_move(hp, tmp, mv[0]["keys"], 201, 202, [str(tmp / ("fv%d" % i)) for i in range(3)], unit="Hug"); assert 0
+except SystemExit as e: assert "verification failed" in str(e)
+finally: S.pak_slots = real_ps
+assert hsnap() == h_before
+# old (1.0.0) cache that cached the table as 'no slot': rebuilt, the table is seen
+cf = tmp / "oldcache.json"; cfg = hp / "~mods/Hug/Hug_Config_P.utoc"; st_ = cfg.stat()
+cf.write_text(json.dumps({"~mods/Hug/Hug_Config_P.utoc": {"sig": [st_.st_size, int(st_.st_mtime)], "slots": []}}))
+assert "~mods/Hug/Hug_Config_P.utoc" in S.scan(hp, cf)
+# complementary check: two containers of one folder that hold the SAME package are not one mod (a real clash inside a folder)
+dp = tmp / "dup" / "~mods" / "Coll"; dp.mkdir(parents=True); make_multi(dp, "a_P", [(A + "300", "300.uasset")], cid=1); make_multi(dp, "b_P", [(A + "300", "300.uasset")], cid=2)
+dinv = S.scan(tmp / "dup"); du = S.group_units(tmp / "dup", dinv, {}); assert sorted(len(v) for v in du.values()) == [1, 1] and list(S.clashes(S.unit_inv(dinv, du))) == [300]
+# loose install (no subfolder): grouped by mod name (_P / _Config / _ConfigAnim stripped); Vortex source also groups
+fp = _hug_world("hugflat", flat=True); finv = S.scan(fp); fu = S.group_units(fp, finv, {}); assert sorted(len(v) for v in fu.values()) == [1, 3], fu
+vs = {os.path.normcase(str(hp / k)): "HugMod" for k in hinv if "Hug" in k}; assert sorted(len(v) for v in S.group_units(hp, hinv, vs).values()) == [1, 3]
+# legacy plan_moves keeps its old shape (every container alone)
+assert S.plan_moves(hp, {"~mods/Old/old_P.utoc": [201], "~mods/Hug/Hug_P.utoc": [201]}, 1000, ())[0] == [("~mods/Hug/Hug_P.utoc", 201, 202)]
+# ---- review round 1: fallbacks must never tear a mod apart
+# (1) one folder holds Hug (3 containers) AND an unrelated rival on 201: split by mod name, Hug still moves as a whole
+ap_ = tmp / "allpaks" / "~mods" / "All"; _hug(ap_, None, 400); make_multi(ap_, "Other_P", [(A + "201", "201.uasset")], cid=500)
+for f_ in ap_.iterdir(): os.utime(f_, (1.6e9, 1.6e9) if f_.name.startswith("Other") else (1.7e9, 1.7e9))
+ainv = S.scan(tmp / "allpaks"); au = S.group_units(tmp / "allpaks", ainv, {}); assert sorted(len(v) for v in au.values()) == [1, 3] and S.group_units.notes, (au, S.group_units.notes)
+am, aun = S.plan_unit_moves(tmp / "allpaks", ainv, 1000, (), units=au); assert not aun and len(am) == 1 and len(am[0]["keys"]) == 3, (am, aun)
+# (2) names that cannot be split (Foo main, Bar partner table, Other rival) in one folder: REFUSED, nothing moves (no half move)
+rp = tmp / "refuse" / "~mods" / "Mix"; rp.mkdir(parents=True)
+make_multi(rp, "Foo_P", [(A + "201", "201.uasset")], cid=1); make_multi(rp, "BarX_P", [(A + "201a", "201a.uasset")], cid=2); make_multi(rp, "Other_P", [(A + "201", "201.uasset")], cid=3)
+rinv = S.scan(tmp / "refuse"); rm_, run_ = S.plan_unit_moves(tmp / "refuse", rinv, 1000, (), units=S.group_units(tmp / "refuse", rinv, {}))
+assert not rm_ and run_ and "partner part" in " ".join(run_[0][2]), (rm_, run_)
+# (3) one mod's main clip and ANOTHER mod's partner table: they only work as a pair, so nothing is moved
+sp_ = tmp / "split" / "~mods"; (sp_ / "MainMod").mkdir(parents=True); (sp_ / "PartnerAddon").mkdir()
+make_multi(sp_ / "MainMod", "Main_P", [(A + "201", "201.uasset")], cid=1); make_multi(sp_ / "PartnerAddon", "Add_P", [(A + "201a", "201a.uasset")], cid=2)
+sinv = S.scan(tmp / "split"); sm_, sun_ = S.plan_unit_moves(tmp / "split", sinv, 1000, (), units=S.group_units(tmp / "split", sinv, {}))
+assert not sm_ and sun_ and "split across mods" in " ".join(sun_[0][2]), (sm_, sun_)
+# (4) START MARKERS: a kill between containers leaves unfinished journals for the WHOLE unit, so interrupted() flags it and revert undoes it
+kp = _hug_world("killpaks"); kinv = S.scan(kp); kk_ = [k for k in sorted(kinv) if "Hug" in k]; kb = tmp / "killbk"; kb.mkdir()
+bks = [str(kb / ("move-x-%d" % i)) for i in range(3)]
+for k, b in zip(kk_, bks): (kb / pathlib.Path(b).name).mkdir(); S._save_manifest(kb / pathlib.Path(b).name / "manifest.json", {"kind": "move", "pak": k, "old": 201, "new": 202, "steps": [], "done": False})
+k_before = {str(q.relative_to(kp)): hashlib.sha256(q.read_bytes()).hexdigest() for q in kp.rglob("*") if q.is_file()}
+S.apply_move(kp, tmp, kk_[0], 201, 202, bks[0], ext=False)                                                 # ... and the process dies here
+assert len(S.interrupted(str(kb))) == 2 and bks[1] in S.interrupted(str(kb)), S.interrupted(str(kb))      # the 2 containers never reached
+for b in reversed(bks): S.revert_move(b)
+assert {str(q.relative_to(kp)): hashlib.sha256(q.read_bytes()).hexdigest() for q in kp.rglob("*") if q.is_file()} == k_before and not S.interrupted(str(kb))
+# (5) the owner identity used by the preview is the one the apply uses
+seen = []; real_ext3 = S.external_files
+S.external_files = lambda *a, **k: (seen.append(a[6]), real_ext3(*a, **k))[1]
+try:
+    jj = S.apply_unit_move(kp, tmp, kk_, 201, 202, [str(tmp / ("mv%d" % i)) for i in range(3)], mover="Vortex Hug Mod", unit="Hug")
+    assert seen == ["Vortex Hug Mod"], seen
+    for i in (2, 1, 0): S.revert_move(str(tmp / ("mv%d" % i)))
+finally: S.external_files = real_ext3
+# (6) a rollback that cannot undo everything says so
+n_calls = []; real_am = S.apply_move; real_rm = S.revert_move
+def flaky2(*a, **k):
+    n_calls.append(1)
+    if len(n_calls) == 3: raise OSError("disk full")
+    return real_am(*a, **k)
+def rm_kept(b):
+    r = real_rm(b); rm_kept.kept = 1; return r
+S.apply_move = flaky2; S.revert_move = rm_kept
+try: S.apply_unit_move(kp, tmp, kk_, 201, 202, [str(tmp / ("rk%d" % i)) for i in range(3)], unit="Hug"); assert 0
+except OSError: assert S.apply_unit_move.clean is False
+finally: S.apply_move = real_am; S.revert_move = real_rm
+assert {str(q.relative_to(kp)): hashlib.sha256(q.read_bytes()).hexdigest() for q in kp.rglob("*") if q.is_file()} == k_before
+# (7) the CLI end to end on a unit: plan shows ONE mod, moveslots --apply moves all three, revert restores byte for byte
+import io, contextlib
+gh = tmp / "hg"; _w = _hug_world("hg/Content/Paks"); gp = gh / "Content" / "Paks"
+g_before = {str(q.relative_to(gp)): hashlib.sha256(q.read_bytes()).hexdigest() for q in gp.rglob("*") if q.is_file()}
+common = ["--game", str(gh), "--no-cache", "--cache", str(tmp / "hgc.json"), "--backup", str(tmp / "hgbk"), "--ceiling", "999"]
+def cli(*extra):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out): rc = S.main(common + list(extra))
+    return rc, out.getvalue()
+rc, o = cli("plan"); assert "(3 containers)" in o and "1 moves proposed" in o, o
+rc, o = cli("moveslots", "--apply", "--yes"); assert rc == 0 and "3 containers moved together" in o and "verified" in o, o
+mid = S.scan(gp); assert sorted({tuple(v) for k, v in mid.items() if "Hug" in k}) == [(202,)] and len([k for k in mid if "Hug" in k]) == 3
+rc, o = cli("revert"); assert {str(q.relative_to(gp)): hashlib.sha256(q.read_bytes()).hexdigest() for q in gp.rglob("*") if q.is_file()} == g_before, o
+# ---- review round 2
+mk_a = lambda d, n, files, mount=None, cid=1: make_multi(d, n, files, **({"mount": mount} if mount else {}), cid=cid)
+PM = lambda slot: "../../../SB/Content/Mods/HD-ATOOL_P/anim/%da/" % slot
+# (1) a partner-only addon (overrides Hug's partner clips): shares packages with Hug, but has no main clip -> nothing moves, whichever is older
+for older in ("hug", "addon"):
+    ad = tmp / ("addon_" + older) / "~mods"; _hug(ad, "Hug", 600); (ad / "Addon").mkdir()
+    mk_a(ad / "Addon", "Add_P", [(A + "201a/%d" % i, "%d.uasset" % i) for i in (1, 2, 3, 4)], PM(201), cid=700)
+    for f_ in ad.rglob("*"):
+        if f_.is_file(): os.utime(f_, (1.6e9, 1.6e9) if (("Hug" in str(f_)) == (older == "hug")) else (1.7e9, 1.7e9))
+    adi = S.scan(tmp / ("addon_" + older)); adm, adu = S.plan_unit_moves(tmp / ("addon_" + older), adi, 1000, (), units=S.group_units(tmp / ("addon_" + older), adi, {}))
+    assert not adm and adu and "partner part" in " ".join(adu[0][2]), (older, adm, adu)
+# (2) three holders A{201} B{201,201a} C{201a}: C has no main clip -> refused as a whole
+th = tmp / "three" / "~mods"
+for n, files, cid in (("A", [(A + "201", "201.uasset")], 1), ("B", [(A + "201", "201.uasset"), (A + "201a", "201a.uasset")], 2), ("C", [(A + "201a", "201a.uasset")], 3)):
+    (th / n).mkdir(parents=True); mk_a(th / n, n + "_P", files, cid=cid)
+ti = S.scan(tmp / "three"); tm_, tu_ = S.plan_unit_moves(tmp / "three", ti, 1000, (), units=S.group_units(tmp / "three", ti, {})); assert not tm_ and tu_
+# (3) unrelated clips in one folder are NOT one mod; a multi-slot pack (201+305 / 201a clips / 305a table) IS one mod
+hm = tmp / "hugmix" / "~mods" / "Pack"; _hug(hm, None, 800); mk_a(hm, "Other_P", [(A + "305", "305.uasset")], cid=900)
+hmi = S.scan(tmp / "hugmix"); hmu = S.group_units(tmp / "hugmix", hmi, {}); assert sorted(len(v) for v in hmu.values()) == [1, 3] and not any("(4 containers)" in S.unit_label(u, k) for u, k in hmu.items()), hmu
+mp_ = tmp / "multislot" / "~mods" / "Pack"; mp_.mkdir(parents=True)
+mk_a(mp_, "X_P", [(A + "201", "201.uasset"), (A + "305", "305.uasset")], cid=1); mk_a(mp_, "Y_P", [(A + "201a/1", "1.uasset")], PM(201), cid=2); mk_a(mp_, "Z_P", [(A + "305a", "305a.uasset")], cid=3)
+mpi = S.scan(tmp / "multislot"); mpu = S.group_units(tmp / "multislot", mpi, {}); assert sorted(len(v) for v in mpu.values()) == [3], mpu
+# (4) the rollback status is honest when apply_move's OWN rollback could not undo everything (a file changed since the move)
+cp_ = _hug_world("cleanpaks"); cinv = S.scan(cp_); ck = [k for k in sorted(cinv) if "Hug" in k]; real_ext4 = S.external_files
+def touch_then_boom(*a, **k): (cp_ / ck[0]).write_bytes((cp_ / ck[0]).read_bytes() + b"x"); raise OSError("antivirus")
+S.external_files = touch_then_boom
+try: S.apply_unit_move(cp_, tmp, ck, 201, 202, [str(tmp / ("cl%d" % i)) for i in range(3)], unit="Hug"); assert 0
+except OSError: assert S.apply_unit_move.clean is False
+finally: S.external_files = real_ext4
+# (5) a marker that cannot be written leaves no unfinished journal behind
+kq = _hug_world("markpaks"); kqi = S.scan(kq); kqk = [k for k in sorted(kqi) if "Hug" in k]; mkd = tmp / "mkbk"; mkd.mkdir()
+real_sm = S._save_manifest; cnt = []
+def sm_fail(path, j):
+    cnt.append(1)
+    if len(cnt) == 2: raise OSError("disk full")
+    return real_sm(path, j)
+S._save_manifest = sm_fail
+try: S.apply_unit_move(kq, tmp, kqk, 201, 202, [str(mkd / ("move-y-%d" % i)) for i in range(3)], unit="Hug"); assert 0
+except OSError: pass
+finally: S._save_manifest = real_sm
+assert not S.interrupted(str(mkd)), S.interrupted(str(mkd))
+# ---- review round 3
+def cli2(game, *extra, bk="r3bk"):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out): rc = S.main(["--game", str(game), "--no-cache", "--cache", str(tmp / "r3c.json"), "--backup", str(tmp / bk), "--ceiling", "999"] + list(extra))
+    return rc, out.getvalue()
+snapd = lambda root: {str(q.relative_to(root)): hashlib.sha256(q.read_bytes()).hexdigest() for q in root.rglob("*") if q.is_file()}
+# (A1) --pak must not strand a pair: a main clip whose partner containers could not be grouped (names share no stem) is refused, and --pak must hold --slot
+g3 = tmp / "pakg"; m3 = g3 / "Content" / "Paks" / "~mods"; m3.mkdir(parents=True)
+make_multi(m3, "Hug_P", [(A + "201", "201.uasset")], cid=1); make_multi(m3, "Other_P", [(A + "201", "201.uasset")], cid=4)
+make_multi(m3, "Lily_ConfigAnim_P", [(A + "201a/%d" % i, "%d.uasset" % i) for i in (1, 2)], mount=PM(201), cid=2); make_multi(m3, "Lily_Config_P", [(A + "201a", "201a.uasset")], cid=3)
+b3 = snapd(g3 / "Content" / "Paks")
+rc, o = cli2(g3, "moveslots", "--pak", "~mods/Hug_P.utoc", "--slot", "201", "--to", "210", "--apply", "--yes"); assert rc == 2 and "cannot move" in o and "partner part" in o and snapd(g3 / "Content" / "Paks") == b3, o
+rc, o = cli2(g3, "moveslots", "--pak", "~mods/Other_P.utoc", "--slot", "305", "--to", "310", "--apply", "--yes"); assert rc == 2 and "does not hold slot 305" in o and snapd(g3 / "Content" / "Paks") == b3, o
+rc, o = cli2(g3, "moveslots"); assert "holds only the partner part" in o and "nothing to move" in o, o                    # the automatic plan agrees
+# (A2) every container is in exactly one unit, also when components of one folder split on the same mod name
+cf_ = tmp / "collide" / "~mods" / "F"; cf_.mkdir(parents=True)
+for n_, files, cid in (("Hug_P", [(A + "201", "201.uasset")], 1), ("Hug_Config_P", [(A + "201a", "201a.uasset")], 2), ("Hug2_P", [(A + "305", "305.uasset")], 3),
+                       ("Hug-Config_P", [(A + "305a", "305a.uasset")], 4), ("Hug ConfigAnim_P", [(A + "305a", "305a.uasset"), (A + "305a/1", "1.uasset")], 5)):
+    mk_a(cf_, n_, files, cid=cid)
+cfi = S.scan(tmp / "collide"); cfu = S.group_units(tmp / "collide", cfi, {})
+assert sorted(k for ks in cfu.values() for k in ks) == sorted(cfi), cfu
+for u_, i_ in ((hu, hinv), (hmu, hmi), (mpu, mpi), (du, dinv), (fu, finv)):
+    assert sorted(k for ks in u_.values() for k in ks) == sorted(i_), (u_, i_)            # the invariant holds for every earlier fixture too
+# (A3) a failed move that could not be undone completely leaves a durable, correctly worded trace; revert refuses instead of undoing OLDER runs
+pw = _hug_world("partpaks"); pinv = S.scan(pw); pk_ = [k for k in sorted(pinv) if "Hug" in k]; pb = tmp / "pbk"; pb.mkdir()
+old_run = pb / "move-0000-0"; old_run.mkdir(); S._save_manifest(old_run / "manifest.json", {"kind": "move", "pak": "x", "old": 1, "new": 2, "steps": [], "done": True})
+real_ext5 = S.external_files
+def touch_boom(*a, **k): (pw / pk_[0]).write_bytes((pw / pk_[0]).read_bytes() + b"x"); raise OSError("antivirus")
+S.external_files = touch_boom
+try: S.apply_unit_move(pw, tmp, pk_, 201, 202, [str(pb / ("move-9999-%d" % i)) for i in range(3)], unit="Hug"); assert 0
+except OSError: assert S.apply_unit_move.clean is False
+finally: S.external_files = real_ext5
+pend = S.interrupted(str(pb)); assert S.partial_pending(pend), pend
+gp3 = tmp / "partg"; (gp3 / "Content" / "Paks").mkdir(parents=True)
+rc, o = cli2(gp3, "revert", bk="pbk"); assert rc == 2 and "revert cannot fix it" in o and (old_run / "manifest.json").exists(), (rc, o)    # the OLD finished run is not touched
+# (B1) a 1.0.0 ledger entry owned by a non-first container of a mod is kept (renamed to the mod's first container)
+lg = tmp / "lg"; (lg / "Content/Paks/LogicMods/HD-ATOOL_P/audio").mkdir(parents=True); wv = lg / "Content/Paks/LogicMods/HD-ATOOL_P/audio/830.wav"; wv.write_bytes(b"W")
+led1 = S.ledger_update(lg, {"~mods/Hug/b.utoc": [830]}, tmp / "lg.json"); assert list(led1.values()) == ["pak:~mods/Hug/b.utoc"]
+led2 = S.ledger_update(lg, {"~mods/Hug/a.utoc": [830]}, tmp / "lg.json", {"~mods/Hug/b.utoc": "~mods/Hug/a.utoc", "~mods/Hug/a.utoc": "~mods/Hug/a.utoc"}); assert list(led2.values()) == ["pak:~mods/Hug/a.utoc"], led2
+# (B8) a holder that cannot be read (legacy .pak) next to a holder with partner packages is refused
+lp_ = tmp / "legacy" / "~mods"; lp_.mkdir(parents=True); make_multi(lp_, "A_P", [(A + "201", "201.uasset"), (A + "201a", "201a.uasset")], cid=1)
+(lp_ / "L.pak").write_bytes(b"junk Mods/HD-ATOOL_P/anim/201/x.uasset junk")
+lpi = S.scan(tmp / "legacy"); lm_, lu_ = S.plan_unit_moves(tmp / "legacy", lpi, 1000, (), units=S.group_units(tmp / "legacy", lpi, {}), mtimes={k: 1 for k in lpi})
+assert not lm_ and lu_ and "cannot be read" in " ".join(lu_[0][2]), (lm_, lu_)
 print("ok")

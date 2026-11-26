@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.0.1 (2026-11-26)
+Fix for animation mods that ship several containers for one slot (found with HD-EVE-Lilly-Hug, Nexus 2088: after a slot move Lily and her mecha were gone). Details: `docs/bug-lilly-hug.md`.
+
+### Fixed
+- A mod that ships its clip in several containers (main clip `201`, partner clips `201a/*`, partner table `201a`) is now ONE mod. Its containers never clash with each other and always move together, all or nothing: every container is checked first, a failure rolls the already moved ones back, and afterwards each one is re-read and must report the new slot. 1.0.0 moved only one of them, so the partner (Lily + mecha) was left on the old slot.
+- The partner table (`NNNa.uasset`) is recognised as slot NNN (1.0.0 could not see it).
+- Containers whose slot folder is part of their mount point (`.../anim/201a/`, the partner pak of Lilly-Hug) can be moved; 1.0.0 refused them.
+- Audio, PEFA names and PELA files that belong to a moved slot are handled once per mod, not once per container. `--pak` moves the whole mod.
+- The scan cache is versioned: a cache written by 1.0.0 is rebuilt once. A 1.0.0 ownership ledger keeps working.
+
+### Safer
+- A clash is refused (nothing moves, the reason is printed) when a main clip and its partner parts sit in different mods or in containers that cannot be grouped, when a partner-only addon is involved, or when a holder cannot be read next to one with partner packages.
+- Grouping: Vortex source mod, else the mod's own folder, else loose files by mod name. Containers of one folder count as one mod only when they hold a common slot and different packages; unrelated clips in a mod-pack folder are not merged.
+- Every container of a mod gets an unfinished journal before the first byte is written, so a crash or a closed window between containers is detected on the next run and `revert` undoes what was done.
+- If a failed move cannot be rolled back completely (a file changed meanwhile) the tool says so, says NOT to run `revert`, names where the originals are, and refuses further changes until that journal folder is dealt with. `revert` then does nothing instead of undoing older runs.
+- `plan` uses the same planner and refusals as the real run.
+
+### Support log
+- The log lists every grouped mod (`mod X = a, b, c`), each clash with its members, each move (`slot 201 -> 202 (3 containers moved together: ...)`), `verified: ... now on slot 202`, and every refusal or rollback with its reason. `--version` reports the build.
+
+### Changed behaviour
+- A lone container that holds only partner packages (a table-only addon) is no longer moved by itself; it is reported. 1.0.0 moved it and could strand the pair.
+
+### Verified
+- Offline: new tests for multi-container mods (grouping, atomic move, rollback, crash markers, byte-for-byte undo, `--pak`, `plan`, refusals) on synthetic containers and on the real Lilly-Hug containers; four independent review rounds, the last with no blocking finding.
+- In game (2026-11-26, Vortex, a conflicting mod on the same slot): HD-EVE-Lilly-Hug moved 201 -> 202 as three containers, Lily and her mecha appear. Eve and Lily looked overlapped in that test; the animation data is byte-identical to the original apart from the slot name, so the tool did not change positions, but the same scene was not compared at the original slot in game.
+- Known, harmless: PEFA's list shows an extra group "HD-EVE-Lilly-Hug ConfigAnim (4)" for this mod. PEFA reads the partner clips' files `1.uasset`..`4.uasset` as slots 1-4; it is identical before the move and the entries do nothing.
+
 ## 1.0.0 (2026-11-25)
 Entries are in development order; later sections are the final state (superseded lines are marked).
 

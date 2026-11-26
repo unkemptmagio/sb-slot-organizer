@@ -8,6 +8,7 @@ Run "slots_test" { python tests\slots_test.py }
 Run "iostore_test" { python tests\iostore_test.py }
 Run "PyInstaller" { python -m PyInstaller --onefile --name SlotOrganizer --distpath dist --workpath build --specpath build slots.py 2>$null | Out-Null }
 $ver = (python slots.py --version).Split(" ")[1]
+if ($ver -match "dev") { throw "version $ver is a dev build: set VERSION in slots.py first" }
 if ((& .\dist\SlotOrganizer.exe --version) -ne "SlotOrganizer $ver") { throw "built exe reports the wrong version" }
 $dll = Join-Path $Game "Binaries\Win64\ue4ss\Mods\AToolSlotLimit\dlls\main.dll"
 if (-not (Test-Path -LiteralPath $dll)) { throw "AToolSlotLimit main.dll not found at $dll (pass -Game <SB folder>)" }

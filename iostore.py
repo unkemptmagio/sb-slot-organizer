@@ -384,6 +384,9 @@ def _dir_paths(di):
 
 def _rename_dirindex(c, old, new):
     di = c.dirindex; so, sn = str(old), str(new); paths = _dir_paths(di)
+    # the slot folder can be baked into the MOUNT POINT itself (.../anim/201a/ holding 1.uasset ... 4.uasset, as in Lilly-Hug's ConfigAnim pak): the folder
+    # then has no directory entry, so rewrite the mount point (an exact folder segment, never part of another number)
+    di["mount"] = re.sub(r"(?i)(/hd-atool_p/anim/)%s(a?)(/|$)" % re.escape(so), lambda m: m.group(1) + sn + m.group(2) + m.group(3), di["mount"])
     def newstr(i, text):                    # string table entries may be shared: add a new one and repoint, never edit in place
         di["strings"].append(text); di["kinds"].append(di["kinds"][i]); return len(di["strings"]) - 1
     for idx, e in enumerate(di["dirs"]):

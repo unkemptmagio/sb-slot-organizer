@@ -1,7 +1,7 @@
 # AToolSlotLimit mod page / SlotOrganizer release text (draft)
 
 > ## TESTED VERSIONS - READ FIRST
-> **SlotOrganizer 1.0.0** was tested on one setup: **Windows 11 - Stellar Blade (Steam) - mods installed with Vortex - UE4SS "RevOG SB-UE4SS 1.3"**.
+> **SlotOrganizer 1.0.1** was tested on one setup: **Windows 11 - Stellar Blade (Steam) - mods installed with Vortex - UE4SS "RevOG SB-UE4SS 1.3"**.
 >
 > **The optional AToolSlotLimit mod (slots above 1000) works ONLY with `RevOG SB-UE4SS 1.3`:**
 > - `UE4SS.dll` SHA-256 `E0CC51CE5B47D5BE82194510B0B4B4054DD15CE0322A983655A022F92D27DABE`

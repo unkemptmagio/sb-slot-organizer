@@ -17,6 +17,10 @@ SlotOrganizer - Stellar Blade anim slot organizer
 |    the optional mod on any other UE4SS.
 |  * Not tested on a real game folder: installs without Vortex (only on synthetic test
 |    folders), Epic / GOG copies of the game.
+|  * 1.0.1 verified in game: a mod with THREE containers on one slot (HD-EVE-Lilly-Hug) moved
+|    together, Lily and her mecha appear. In that test Eve and Lily looked overlapped; the
+|    animation data is identical to the original, so the tool did not change positions, but
+|    it was not compared at the original slot in game.
 +------------------------------------------------------------------------------------------
 
 WHAT IT DOES
@@ -26,6 +30,8 @@ one of them silently stops working. SlotOrganizer finds those clashes and fixes 
 
   * container-id clash -> the clashing pak gets a new unique container id
   * slot clash         -> the newer mod's clip is moved to a free slot (same digit count)
+  * a mod that ships several containers for one slot (main clip, partner clips, partner table;
+    e.g. HD-EVE-Lilly-Hug) counts as ONE mod: its containers move together, or not at all
   * the files that belong to a moved slot (audio, PEFA names, PELA patches) follow it
 
 QUICK START
@@ -36,8 +42,8 @@ QUICK START
  Run it again after you install or update animation mods.
 
 WHAT CHANGES ON DISK (and how it is undone)
-  * slot move: the pak is rewritten. The original is kept beside it as <name>.utoc.orig /
-    <name>.ucas.orig (then .orig1 ... for later moves).
+  * slot move: the mod's container(s) are rewritten (all of a mod's containers or none). Each
+    original is kept beside it as <name>.utoc.orig / <name>.ucas.orig (then .orig1 ... for later moves).
   * container-id fix: the new id is written into the pak in place (three small spots); the
     old ids are kept in the journal. With Vortex the staged copy is a hard link, so it
     changes too.
@@ -51,9 +57,10 @@ with an error, and the original is kept (paks: beside it as *.orig; other files:
 files as external changes; do not delete them until you are happy with the result.
 
 COMMANDS (terminal)
-  SlotOrganizer.exe scan | moveslots | fixids | auto | revert | --version
+  SlotOrganizer.exe scan | plan | moveslots | fixids | auto | revert | log | --version
   moveslots / fixids only show a plan; add --apply to write (asks first; --yes skips asking)
   options: --game <StellarBlade or its SB folder>   --reserved <file of slots to avoid>
+           moveslots --pak <~mods/x.utoc> --slot N --to M   moves that whole mod's containers
   Slots 901-907 are never used as targets by default (they belong to the Tachy face scenes); put your own
   list in reserved.txt next to the exe (one slot or a range such as 901-907 per line, # for comments).
 
@@ -85,12 +92,18 @@ WHAT IT WILL NOT DO (it reports instead of guessing)
   * legacy .pak-only mods (slot stored inside the pak) - ask the author for an IoStore build
   * compressed containers, or moving a slot to a different digit count (98 -> 100)
   * touch mods that are not animation packs
+  * move a main clip away from its partner parts: if they are in different mods or folders (or a
+    container only holds partner data), or one container of a mod cannot be rewritten, the whole
+    clash is reported and nothing moves. Install such parts as one mod, then run it again.
 If no free slot is left, or a pak cannot be rewritten safely, the clash is reported and left.
 
 SAFETY NOTES
   * Close the game first; the tool refuses to write while it runs, and checks again after you answer.
   * If a previous run was interrupted (crash, power loss) the tool says so and offers to undo it
     (or use Undo-last-run.bat); it changes nothing until that is done.
+  * If a failed move could not be undone completely the tool says "NOT fully rolled back" and tells
+    you NOT to run revert: the originals are in the journal folder (path printed) and as *.orig
+    beside the paks. Send the log; delete that journal folder once the files are checked.
   * Windows SmartScreen / antivirus may warn about unsigned one-file exes.
 
 IF SOMETHING GOES WRONG
@@ -99,6 +112,13 @@ Every run writes a plain-text log: %LOCALAPPDATA%\SlotOrganizer\logs\slotorganiz
 and the last lines:  SlotOrganizer.exe log
 When you ask for help, attach that file. It contains what the tool printed: the paths of your game and mod folders (which can include your Windows user name) and the file names of your mods - read it first if that matters to you. It contains no passwords.
 First try Undo-last-run.bat, then ask.
+Lines to look for with a mod that has several containers (e.g. Lilly-Hug):
+  * working:  "mod X = a, b, c", "X: slot 201 -> 202 (3 containers moved together: ...)", "verified: X now on slot 202"
+  * "slot N cannot be fixed automatically ... holds only the partner part": a main clip and its partner parts are in
+    different mods/folders; install them as one mod
+  * "note: ... split by mod name": a folder holds several mods; harmless
+  * "move of X failed and was rolled back completely" or "NOT fully rolled back": attach the log (and say which)
+PEFA may list an extra group "<mod> ConfigAnim (N)" for such a mod: harmless, it is the same before the move.
 
 IF THE OPTIONAL MOD DOES NOT WORK (AToolSlotLimit)
 It writes the same lines to two places: the UE4SS log  <game>\SB\Binaries\Win64\ue4ss\UE4SS.log  (search for "AToolSlotLimit")
