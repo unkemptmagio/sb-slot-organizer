@@ -32,3 +32,10 @@
 - ledger entries carry file size+mtime and drop when the file changed or the owner left; garbage/old-format ledgers are ignored; ledger written atomically.
 - free_slot only offers slots with the same digit count (clashes at 9/99/999 resolve); wav rename/copy and file edits are journaled before they happen; names.txt edited as bytes (CRLF and odd bytes survive); PELA read with BOM tolerance.
 - revert needs no game folder, refuses while the game runs, and handles odd backup paths; a failed batch says how many moves were applied; --pak dry run shows why a move is refused; all-skipped fixids leaves no journal; relative --game is resolved.
+
+## 1.0.0 release hardening
+- Bulk data (.ubulk) of a moved package follows it (chunk id, directory entry, check); legacy .pak mods get a clear message.
+- CityHash64 known-answer vectors (real stored hashes, 65..232 B incl. 128/192) in the tests.
+- uto command (double-click): moves slots and fixes container ids, asking first; --yes, --version; first-run note when no mod manager manifest exists.
+- End-to-end test: auto + revert on a fake game folder.
+- release.ps1, README-USER.txt, install-atool-limit.ps1.

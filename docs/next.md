@@ -1,12 +1,16 @@
-# Next steps (in order)
-1. **Spike 0 done**: the 1000 limit is three `IntConst 1000` in ATOOL `ModActor` (`DataGet1-3`), see `docs/spike0-atool-limit.md`. Pick a patch route (runtime UE4SS patch preferred, no redistribution).
-2. **Spike, applying a move**: options are (A) PEFA metadata only, (B) re-slot our own ported paks via the port repo's registry, (C) rewrite/override third-party paks. C is unproven and may crash the game.
-3. `apply` (backup, dry-run first, refuse while game runs) and `revert`, then PyInstaller `.exe`, CHANGELOG, release zip.
-4. Reserved slots file (`reserved.txt`, seed 901-907 Tachy face) wired into the CLI (`plan(reserved=)` exists).
+﻿# Status and next steps (2026-11-25)
 
-5. Container-id clashes are the real 'clip unavailable' cause (scan reports them). `apply` could re-chunk OUR paks (new container id) but cannot fix third-party clashes; report them and tell the user which pak to disable.
-6. Slot 660 test pak loads and plays; slot 6666 (same scene, same pak name) does not, so something slot-number specific remains. Find the real threshold (build 1001 / 2000) before promising >1000 slots.
+## Done and verified in game
+- ATOOL 1000 limit located (three IntConst 1000 in ModActor DataGet1-3) and lifted at runtime by AToolSlotLimit (slots 1001/2000 play).
+- Container-id clashes (ESAP 700-709, OldDroid 307-311) fixed with `fixids`, both confirmed in game.
+- `moveslots`: IoStore rewrite (ids, name hashes incl. CityHash64 long branch, header, directory index, bulk data), journaled with rollback, guarded revert. Moved BBS_P (sheep), Feet's Whisper clash test and the Leito test pak, all play.
+- Slot-keyed files follow their owner (Vortex manifests, else the first-sight ledger).
+- Two independent code reviews done and fixed (see CHANGELOG).
+- Release: `release.ps1` -> `release/SlotOrganizer-<version>.zip` (exe, user README, AToolSlotLimit + installer).
 
-7. fixids: apply it on the real install (ESAP, OldDroid) and confirm in game that slots 700-709 / 307-311 now appear in ATOOL's list (`anim3`); then PyInstaller exe, ceiling auto-detect (9999 when AToolSlotLimit is installed), reserved.txt.
-
-8. Done 2026-11-25: fixids applied + verified for ESAP, ceiling auto-detect, reserved.txt, exe. Left: release zip + README for users, confirm OldDroid in game, GitHub repos (private) for sb-slot-organizer and sb-atool-slot-limit, an installer script for AToolSlotLimit, `plan` apply for our own paks via the port repo.
+## Open
+1. Digit-count changes (98 -> 100) are refused: not verified in game (string lengths inside blobs).
+2. Compressed containers and legacy .pak mods are reported, not moved.
+3. Own-pak re-slotting through the port repo (port.py assigns slots, writes wav/names/PELA and the owner together) so the tool never has to guess for our packs.
+4. Code signing / SmartScreen, a license for public release, Nexus page text.
+5. AToolSlotLimit is built for one private UE4SS build (3.0.1, SHA 08a0733): re-test against the UE4SS version users have.

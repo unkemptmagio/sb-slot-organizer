@@ -39,3 +39,7 @@ python slots.py moveslots plans a move for every slot held by two or more anim p
 ames.txt, PELA json) follow their owner. Owner comes from Vortex's deployment manifests when present; manual / mod-manager installs have none, so the tool keeps a first-sight ledger (slot_owners.json, filled on every run while a slot has a single pak). Known owner = renamed; other mod's = left; unknown on a shared slot = wav and PEFA name are copied, PELA left. A manually installed mod that overwrites another mod's wav before the first run cannot be told apart: run the tool once on a clean install, then after each install.
 
 Not supported (reported, not guessed): moved packages with bulk chunks, digit-count changes, compressed containers.
+
+## Release
+
+.\release.ps1 runs the tests, builds the exe and writes elease\SlotOrganizer-<version>.zip (exe, README-USER.txt, optional AToolSlotLimit with install-atool-limit.ps1). Double-clicking the exe runs uto: scan, show what would change, ask, apply. --yes skips the question; --version prints the version.

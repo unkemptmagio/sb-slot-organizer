@@ -3,7 +3,7 @@ import sys, pathlib, tempfile, struct, hashlib, os, json
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import iostore as I, slots as S
 
-def make_pak(d, name, slot, cid=0x1122334455667788, extra=b"", dirs_in_mount=True):
+def make_pak(d, name, slot, cid=0x1122334455667788, extra=b"", dirs_in_mount=True, bulk=False):
     """one anim clip package at /Game/Mods/HD-ATOOL_P/anim/<slot>, as UnrealPak would lay it out"""
     pkg = f"/Game/Mods/HD-ATOOL_P/anim/{slot}"
     names = ["/Engine/Animation/Foo", pkg, str(slot), "Class", "AnimSequence"]
@@ -18,8 +18,8 @@ def make_pak(d, name, slot, cid=0x1122334455667788, extra=b"", dirs_in_mount=Tru
     h = bytearray(144); h[:16] = I.MAGIC; h[16] = 2; struct.pack_into("<IIIIIII", h, 20, 144, 2, 2, 12, 0, 32, 65536); h[80] = 8
     c = I.Container(); c.header = h; c.block_size = 65536; c.container_id = cid; c.block_align = 16
     mk = lambda i, t, dta: dict(id=i, index=0, pad=0, type=t, data=dta, meta_flags=0, meta_pad=bytes(12), meta_hash=b"", sha_ok=True, dirty=False)
-    c.chunks = [mk(cid, 10, hdr), mk(pid, 2, data)]
-    c.dirindex = dict(mount="../../../SB/Content/Mods/HD-ATOOL_P/anim/", mount_kind=1, dirs=[[0xFFFFFFFF] * 3 + [0]], files=[[0, 0xFFFFFFFF, 1]], strings=[f"{slot}.uasset"], kinds=[1])
+    c.chunks = [mk(cid, 10, hdr), mk(pid, 2, data)] + ([mk(pid, 3, b"BULKDATA" * 64)] if bulk else [])
+    c.dirindex = dict(mount="../../../SB/Content/Mods/HD-ATOOL_P/anim/", mount_kind=1, dirs=[[0xFFFFFFFF] * 3 + [0]], files=[[0, 1 if bulk else 0xFFFFFFFF, 1]] + ([[1, 0xFFFFFFFF, 2]] if bulk else []), strings=[f"{slot}.uasset"] + ([f"{slot}.ubulk"] if bulk else []), kinds=[1] * (2 if bulk else 1))
     t, u = I.container_bytes(c); (d / (name + ".utoc")).write_bytes(t); (d / (name + ".ucas")).write_bytes(u)
     return d / (name + ".utoc")
 
@@ -132,4 +132,23 @@ paks3 = tmp / "Paks3"; (paks3 / "~mods").mkdir(parents=True); make_pak(paks3 / "
 S.apply_move(paks3, g, "~mods/q.utoc", 600, 601, tmp / "g1", shared=False)
 (paks3 / "~mods" / "q.utoc").write_bytes(b"NEWER VERSION FROM THE MOD AUTHOR")
 S.revert_move(tmp / "g1"); assert (paks3 / "~mods" / "q.utoc").read_bytes() == b"NEWER VERSION FROM THE MOD AUTHOR" and (tmp / "g1" / "manifest.partial.json").exists()
+# bulk data of a moved package follows it (chunk id + .ubulk directory entry)
+bk = make_pak(tmp, "bulk", 770, cid=21, bulk=True); cb = I.read_container(bk); assert not I.check_container(cb)
+I.rename_slot(cb, 770, 771); assert not I.check_container(cb), I.check_container(cb)
+t2, u2 = I.container_bytes(cb); (tmp / "bx.utoc").write_bytes(t2); (tmp / "bx.ucas").write_bytes(u2); cb2 = I.read_container(tmp / "bx.utoc")
+assert not I.check_container(cb2) and [ch["id"] for ch in cb2.chunks if ch["type"] == 3] == [I.package_id("/Game/Mods/HD-ATOOL_P/anim/771")] and cb2.chunks[2]["data"] == b"BULKDATA" * 64
+assert "771.ubulk" in cb2.dirindex["strings"] and "770.ubulk" not in cb2.dirindex["strings"]
+# CityHash64 known answers (real stored hashes from installed paks; covers the long branch incl. multi-block inputs)
+KAT = [('/game/art/character/monster/ch_m_na_17/textures/ch_m_na_17_body_a', 15663605014358446738), ('/\x00g\x00a\x00m\x00e\x00/\x00o\x00u\x00t\x00f\x00i\x00t\x00m\x00o\x00d\x00s\x00/\x00a\x00i\x00k\x00_\x00a\x00c\x00c\x00/\x00m\x00a\x00s\x00k\x00/\x00x\x004\x00w\x00', 9887348984085467770), ('/game/art/character/generic/globalmastermaterials/eye/t_eye_normals', 3590192869285283468), ('/\x00g\x00a\x00m\x00e\x00/\x00m\x00o\x00d\x00s\x00/\x00l\x00a\x00s\x00k\x00i\x00l\x00l\x00s\x00/\x00a\x00n\x00i\x00m\x00a\x00t\x00i\x00o\x00n\x00s\x00/\x00e\x00m\x00/\x00c\x00h\x00_\x00m\x00_\x00n\x00a\x00_\x001\x006\x00_\x00g\x00r\x00a\x00b\x001\x00', 10635500273041660316), ('/\x00g\x00a\x00m\x00e\x00/\x00a\x00r\x00t\x00/\x00c\x00h\x00a\x00r\x00a\x00c\x00t\x00e\x00r\x00/\x00p\x00c\x00/\x00c\x00h\x00_\x00p\x00_\x00e\x00v\x00e\x00_\x000\x001\x00/\x00a\x00n\x00i\x00m\x00a\x00t\x00i\x00o\x00n\x00/\x00e\x00v\x00e\x00_\x00d\x00e\x00a\x00d\x00_\x00d\x00o\x00w\x00n\x00f\x00a\x00c\x00e\x00u\x00p\x00', 12753453170042660091), ('/\x00g\x00a\x00m\x00e\x00/\x00a\x00r\x00t\x00/\x00c\x00h\x00a\x00r\x00a\x00c\x00t\x00e\x00r\x00/\x00p\x00c\x00/\x00c\x00h\x00_\x00p\x00_\x00e\x00v\x00e\x00_\x000\x004\x00/\x00t\x00e\x00x\x00t\x00u\x00r\x00e\x00s\x00/\x00i\x00n\x00s\x00t\x00/\x00s\x00u\x00i\x00t\x00_\x00c\x00o\x00w\x00b\x00o\x00y\x00_\x00d\x00o\x00w\x00n\x00+\x00w\x00h\x00i\x00t\x00e\x00_\x00b\x00r\x00a\x00', 12943329846651648515), ('/\x00g\x00a\x00m\x00e\x00/\x00a\x00r\x00t\x00/\x00c\x00h\x00a\x00r\x00a\x00c\x00t\x00e\x00r\x00/\x00p\x00c\x00/\x00c\x00h\x00_\x00p\x00_\x00e\x00v\x00e\x00_\x006\x001\x00/\x00t\x00e\x00x\x00t\x00u\x00r\x00e\x00s\x00/\x00i\x00n\x00s\x00t\x00_\x00n\x00o\x00r\x00i\x00m\x00a\x00k\x00i\x00_\x00b\x00i\x00k\x00i\x00n\x00i\x00_\x00t\x00e\x00x\x00t\x00u\x00r\x00e\x00s\x00/\x00n\x00o\x00r\x00i\x00m\x00a\x00k\x00i\x00_\x00b\x00i\x00k\x00i\x00n\x00i\x00_\x00p\x00i\x00n\x00k\x00_\x00a\x00', 18376555865347320975), ('/\x00g\x00a\x00m\x00e\x00/\x00c\x00n\x00s\x00r\x00e\x00p\x00a\x00c\x00k\x00e\x00d\x00/\x00e\x004\x008\x00d\x00a\x001\x004\x003\x009\x008\x009\x00f\x008\x00d\x005\x00c\x00/\x00a\x00r\x00t\x00/\x00c\x00h\x00a\x00r\x00a\x00c\x00t\x00e\x00r\x00/\x00p\x00c\x00/\x00c\x00h\x00_\x00p\x00_\x00e\x00v\x00e\x00_\x000\x006\x00/\x00c\x00h\x00_\x00p\x00_\x00e\x00v\x00e\x00_\x000\x006\x00_\x00b\x00o\x00d\x00y\x00_\x00p\x00o\x00n\x00y\x00t\x00a\x00i\x00l\x00p\x00h\x00y\x00s\x00i\x00c\x00s\x00a\x00s\x00s\x00e\x00t\x00', 15464606203485994403), ('/\x00g\x00a\x00m\x00e\x00/\x00c\x00n\x00s\x00r\x00e\x00p\x00a\x00c\x00k\x00e\x00d\x00/\x00c\x00d\x004\x000\x009\x00c\x009\x006\x00a\x000\x00f\x00e\x005\x002\x00d\x009\x00/\x00a\x00r\x00t\x00/\x00c\x00h\x00a\x00r\x00a\x00c\x00t\x00e\x00r\x00/\x00p\x00c\x00/\x00c\x00h\x00_\x00p\x00_\x00e\x00v\x00e\x00_\x00c\x00h\x00r\x00i\x00s\x00t\x00m\x00a\x00s\x00_\x000\x001\x00/\x00c\x00h\x00_\x00p\x00_\x00e\x00v\x00e\x00_\x00c\x00h\x00r\x00i\x00s\x00t\x00m\x00a\x00s\x00_\x000\x001\x00_\x00p\x00o\x00n\x00y\x00t\x00a\x00i\x00l\x00p\x00h\x00y\x00s\x00i\x00c\x00s\x00a\x00s\x00s\x00e\x00t\x00', 3555813393911440970)]
+assert all(I.cityhash64(k.encode("latin-1")) == h for k, h in KAT), "CityHash64 long branch regressed"
+# end to end: `auto --yes` on a fake game folder with a clash, then `revert`
+sb = tmp / "sb"; pm = sb / "Content" / "Paks" / "~mods"; pm.mkdir(parents=True)
+make_pak(pm, "one", 700, cid=31); make_pak(pm, "two", 700, cid=32); os.utime(pm / "two.utoc", (2e9, 2e9))
+h_e2e = {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in pm.iterdir()}
+args = ["--game", str(sb), "--backup", str(tmp / "e2e_bk"), "--cache", str(tmp / "e2e_cache.json")]
+assert S.main(["auto", "--yes"] + args) == 0
+assert not S.clashes(S.scan(sb / "Content" / "Paks")) and (pm / "two.utoc.orig").exists()
+assert S.main(["revert"] + args) == 0
+assert {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in pm.iterdir()} == h_e2e
+assert S.main(["moveslots", "--pak", "~mods/two.pak", "--slot", "700", "--to", "710"] + args) == 2    # not a scanned pak: refused
 print("ok")

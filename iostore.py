@@ -284,7 +284,7 @@ def packages_of(c):
             except (Unsupported, struct.error, IndexError, UnicodeDecodeError): out[i] = None
     return out
 
-def path_names(c):
+def path_names(c, ext=".uasset"):
     """{chunk index: package name derived from the directory index path}. The chunk id is the hash of THIS name; the name stored inside
     the package can differ (ports keep 'Adam' inside while the file is 'Adam_982')."""
     di = c.dirindex; paths = _dir_paths(di); out = {}
@@ -293,8 +293,8 @@ def path_names(c):
         while ff != 0xFFFFFFFF:
             f = di["files"][ff]; name = di["strings"][f[0]]
             full = di["mount"] + (paths[idx] + "/" if paths[idx] else "") + name
-            if name.endswith(".uasset") and f[2] < len(c.chunks) and "Content/" in full:
-                out[f[2]] = "/Game/" + full[:-7].split("Content/", 1)[1]
+            if name.endswith(ext) and f[2] < len(c.chunks) and "Content/" in full:
+                out[f[2]] = "/Game/" + full[:-len(ext)].split("Content/", 1)[1]
             ff = f[1]
     return out
 
@@ -312,12 +312,13 @@ def rename_slot(c, old, new):
     if not moved: raise Unsupported("slot %s is not in this container" % old)
     if any(p is None for p in pk.values()): raise Unsupported("a package of the container cannot be parsed")
     movedids = {c.chunks[j]["id"] for j in moved}; idmap = {}; renames = []
-    if any(ch["type"] not in (2, 10) and ch["id"] in movedids for ch in c.chunks): raise Unsupported("a moved package has bulk chunks (their ids embed the package id; not rewritten)")
     for i in moved:
         nm = pn[i]; m = rx.match(nm)
         nn = ANIM + str(new) + m.group(2) + (m.group(3) or ""); nid = package_id(nn)
         if any(ch["id"] == nid and ch["id"] not in movedids for ch in c.chunks): raise Unsupported("new package id collides inside the container")
         idmap[c.chunks[i]["id"]] = nid; renames.append((nm, nn))
+    for ch in c.chunks:                                     # bulk data (.ubulk etc.): its chunk id is the package id
+        if ch["type"] not in (2, 10) and ch["id"] in idmap: ch["id"] = idmap[ch["id"]]; ch["dirty"] = True
     for i, p in pk.items():
         mine = i in moved
         leaf = None
@@ -378,7 +379,7 @@ def _rename_dirindex(c, old, new):
         ff = e[3]
         while ff != 0xFFFFFFFF:
             f = di["files"][ff]; s = di["strings"][f[0]]
-            if (di["mount"] + paths[idx]).rstrip("/").lower().endswith("hd-atool_p/anim") and s in (so + ".uasset", so + "a.uasset"): f[0] = newstr(f[0], sn + s[len(so):])
+            if (di["mount"] + paths[idx]).rstrip("/").lower().endswith("hd-atool_p/anim") and s in (so + ".uasset", so + "a.uasset", so + ".ubulk", so + "a.ubulk"): f[0] = newstr(f[0], sn + s[len(so):])
             ff = f[1]
     used = {e[0] for e in di["dirs"] if e[0] != 0xFFFFFFFF} | {f[0] for f in di["files"]}
     remap = {}; strings = []; kinds = []
@@ -410,5 +411,9 @@ def check_container(c):
     for i, nm in path_names(c).items():
         try:
             if c.chunks[i]["id"] != package_id(nm): bad.append("chunk %d: id is not the hash of its path %s" % (i, nm))
+        except Unsupported: pass
+    for i, nm in path_names(c, ".ubulk").items():            # bulk data: id must be the hash of its package path too
+        try:
+            if c.chunks[i]["id"] != package_id(nm): bad.append("chunk %d: bulk id is not the hash of its path %s" % (i, nm))
         except Unsupported: pass
     return bad

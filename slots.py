@@ -1,5 +1,6 @@
-"""Scan installed Stellar Blade anim paks for ATOOL slot use. Stdlib only."""
+﻿"""Scan installed Stellar Blade anim paks for ATOOL slot use. Stdlib only."""
 import struct, re, pathlib, collections, sys, os
+VERSION = "1.0.0"
 HERE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
 
 SLOT_RE = re.compile(r"/Game/Mods/HD-ATOOL_P/anim/(\d+)(?:a)?[/.]", re.I)
@@ -266,6 +267,7 @@ def _lock_ok(p):
 def try_rename(root, key, old, new):
     """dry run on an in-memory copy -> (container, None) or (None, reason)"""
     import iostore
+    if str(key).lower().endswith(".pak"): return None, "legacy .pak mod: its slot is stored inside the pak; only IoStore (.utoc/.ucas) mods can be moved - ask the author for an IoStore build"
     try:
         c = iostore.read_container(pathlib.Path(root) / key)
         if old not in iostore.slots_in(c): return None, "slot %d is not a clip package of this pak" % old
@@ -494,11 +496,15 @@ def revert_move(backup):
     os.replace(mp, backup / ("manifest.partial.json" if kept else "manifest.reverted.json"))
     return n
 
+def _ask(q):
+    try: return input("%s [y/N] " % q).strip().lower() in ("y", "yes")
+    except EOFError: return False
+
 def main(argv):
     import argparse, time
     ap = argparse.ArgumentParser(prog="slots", description="Stellar Blade anim slot organizer (scan/plan only so far)")
-    ap.add_argument("cmd", choices=["scan", "plan", "fixids", "moveslots", "revert"]); ap.add_argument("--game"); ap.add_argument("--ceiling", type=int, default=None, help="default: auto (1000, or the AToolSlotLimit limit)"); ap.add_argument("--reserved", default="reserved.txt")
-    ap.add_argument("--apply", action="store_true", help="fixids/moveslots: really write (default: dry run)"); ap.add_argument("--pak", help="moveslots: move this pak (path relative to Paks, e.g. ~mods/BBS_P.utoc)"); ap.add_argument("--slot", type=int, help="moveslots --pak: the slot to move"); ap.add_argument("--to", type=int, help="moveslots --pak: the target slot"); ap.add_argument("--backup", default=os.path.join(HERE, "slot_backups")); ap.add_argument("--cache", default=os.path.join(HERE, "slot_cache.json")); ap.add_argument("--no-cache", action="store_true")
+    ap.add_argument("cmd", choices=["scan", "plan", "fixids", "moveslots", "auto", "revert"]); ap.add_argument("--game"); ap.add_argument("--ceiling", type=int, default=None, help="default: auto (1000, or the AToolSlotLimit limit)"); ap.add_argument("--reserved", default="reserved.txt")
+    ap.add_argument("--apply", action="store_true", help="fixids/moveslots: really write (default: dry run)"); ap.add_argument("--pak", help="moveslots: move this pak (path relative to Paks, e.g. ~mods/BBS_P.utoc)"); ap.add_argument("--slot", type=int, help="moveslots --pak: the slot to move"); ap.add_argument("--to", type=int, help="moveslots --pak: the target slot"); ap.add_argument("--backup", default=os.path.join(HERE, "slot_backups")); ap.add_argument("--cache", default=os.path.join(HERE, "slot_cache.json")); ap.add_argument("--no-cache", action="store_true"); ap.add_argument("--version", action="version", version="SlotOrganizer " + VERSION); ap.add_argument("--yes", action="store_true", help="apply without asking")
     a = ap.parse_args(argv)
     if a.cmd == "revert":                                  # journals hold absolute paths: no game folder needed
         import glob, subprocess
@@ -516,9 +522,14 @@ def main(argv):
         return 0
     g = find_game(a.game)
     if not g: print("Stellar Blade not found; pass --game <...>\SB or set SB_GAME"); return 2
+    if a.cmd == "auto":                                    # what a double-click does: fix slot clashes and container ids, asking first
+        base = ["--game", str(g), "--backup", a.backup, "--cache", a.cache, "--reserved", a.reserved, "--apply"] + (["--yes"] if a.yes else [])
+        r = max(main(["moveslots"] + base), main(["fixids"] + base))
+        print("\nUndo any of this with: SlotOrganizer.exe revert"); return 0 if r in (0, 1) else r
     if a.ceiling is None: a.ceiling = detect_ceiling(g)
     t = time.time(); inv = scan(g / "Content" / "Paks", None if a.no_cache else a.cache)
-    ledger = ledger_update(g, inv, os.path.join(os.path.dirname(os.path.abspath(a.cache)), "slot_owners.json"))
+    lp = os.path.join(os.path.dirname(os.path.abspath(a.cache)), "slot_owners.json"); first_run = not os.path.exists(lp)
+    ledger = ledger_update(g, inv, lp)
     ss = {s for v in inv.values() for s in v}; cl = clashes(inv)
     print("%d paks, %d slots, %d clashes, %d above %d, %d free <= %d  (%d cached, %.2fs)" % (len(inv), len(ss), len(cl), sum(s > a.ceiling for s in ss), a.ceiling, a.ceiling - len([s for s in ss if s <= a.ceiling]), a.ceiling, scan.hits, time.time() - t))
     for s, p in sorted(cl.items()): print("  clash slot %d: %s" % (s, " | ".join(p)))
@@ -534,6 +545,7 @@ def main(argv):
         if not fx: print("nothing to fix"); return 0
         if not a.apply: print("dry run: %d container id(s) would change (add --apply, close the game first)" % len(fx)); return 1
         if "SB-Win64-Shipping.exe" in subprocess.run(["tasklist"], capture_output=True, text=True).stdout: print("Stellar Blade is running: close it first"); return 2
+        if not a.yes and not _ask("Patch %d container id(s) now?" % len(fx)): print("cancelled, nothing changed"); return 1
         bk = "%s/ids-%s" % (a.backup, _t.strftime("%Y%m%d-%H%M%S")); print("game folder:", g)
         done, skipped = apply_fix(g / "Content" / "Paks", fx, bk)
         for k, why in skipped: print("  skipped %s: %s" % (k, why))
@@ -557,12 +569,14 @@ def main(argv):
         srcs = {**ledger, **sources(paks)}                      # Vortex's word beats the ledger
         def shared(k, o): return any(o in v for kk, v in inv.items() if kk != k)
         def mover(k): return srcs.get(os.path.normcase(str(paks / k))) or "pak:" + k
+        if moves and first_run and not sources(paks): print("  note: first run without a mod manager manifest - who owns each slot's audio/PELA files is unknown, so those are copied, not moved. Run the tool once on a clean install, then after each install, to keep ownership exact.")
         for k, o, n in moves:
             print("  %s: slot %d -> %d" % (k, o, n))
             for what, _p in external_files(g, o, n, shared=shared(k, o), mover=mover(k), srcs=srcs): print("      " + what)
         if not moves: print("nothing to move"); return 1 if unresolved else 0
         if not a.apply: print("dry run: %d move(s) (add --apply, close the game first)" % len(moves)); return 1
         if "SB-Win64-Shipping.exe" in subprocess.run(["tasklist"], capture_output=True, text=True).stdout: print("Stellar Blade is running: close it first"); return 2
+        if not a.yes and not _ask("Move %d slot(s) now? (originals are kept as .orig, `revert` undoes it)" % len(moves)): print("cancelled, nothing changed"); return 1
         bk = "%s/move-%s" % (a.backup, _t.strftime("%Y%m%d-%H%M%S")); print("game folder:", g)
         for i, (k, o, n_) in enumerate(moves):
             try: jn = apply_move(paks, g, k, o, n_, "%s-%d" % (bk, i), shared=shared(k, o), srcs=srcs)
@@ -578,10 +592,7 @@ def main(argv):
     return 1 if cl else 0
 
 if __name__ == "__main__":
-    dbl = len(sys.argv) == 1                         # double-clicked exe: show the report (fixids dry run) and wait
-    rc = main(sys.argv[1:] or ["fixids"])
-    if dbl and getattr(sys, "frozen", False):
-        print()
-        print("To apply the fix run in a terminal: SlotOrganizer.exe fixids --apply  (game closed). Undo: SlotOrganizer.exe revert")
-        input("Press Enter to close")
+    dbl = len(sys.argv) == 1                         # double-clicked exe: find clashes, show them, ask, fix, wait
+    rc = main(sys.argv[1:] or ["auto"])
+    if dbl and getattr(sys, "frozen", False): input("\nPress Enter to close")
     sys.exit(rc)
