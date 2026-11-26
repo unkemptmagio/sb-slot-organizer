@@ -28,16 +28,17 @@ Copy-Item -LiteralPath $dll -Destination "$stage\AToolSlotLimit\dlls\main.dll" -
 Copy-Item -LiteralPath "release-files\AToolSlotLimit-README.txt" -Destination "$stage\AToolSlotLimit\README.txt" -ErrorAction Stop
 Set-Content "$stage\AToolSlotLimit\enabled.txt" "1" -Encoding ascii            # canonical defaults, not whatever the author's install holds
 Set-Content "$stage\AToolSlotLimit\config.txt" "limit=9999" -Encoding ascii
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $stageFull = (Resolve-Path $stage).Path; $zipFull = Join-Path (Get-Location).Path $zip
 # one top-level folder and forward-slash entry names; CreateFromDirectory writes backslashes on Windows PowerShell 5.1, so the entries are written by hand
+$prevEap = $ErrorActionPreference; $ErrorActionPreference = "Stop"
 $fs = [IO.File]::Create($zipFull); $za = New-Object IO.Compression.ZipArchive($fs, [IO.Compression.ZipArchiveMode]::Create)
 try {
     Get-ChildItem -LiteralPath $stageFull -Recurse -File | ForEach-Object {
         $entry = $za.CreateEntry("SlotOrganizer-$ver/" + $_.FullName.Substring($stageFull.Length + 1).Replace('\', '/'), [IO.Compression.CompressionLevel]::Optimal)
         $es = $entry.Open(); $in = [IO.File]::OpenRead($_.FullName); try { $in.CopyTo($es) } finally { $in.Dispose(); $es.Dispose() }
     }
-} finally { $za.Dispose(); $fs.Dispose() }
+} finally { if ($za) { $za.Dispose() }; if ($fs) { $fs.Dispose() }; $ErrorActionPreference = $prevEap }
 if (-not (Test-Path $zip)) { throw "zip was not created" }
 $zf = [IO.Compression.ZipFile]::OpenRead($zipFull); $names = $zf.Entries | ForEach-Object { $_.FullName }; $zf.Dispose()
 if ($names | Where-Object { $_ -match '\\' }) { throw "zip entry names contain backslashes" }
