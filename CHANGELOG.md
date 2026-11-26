@@ -80,3 +80,8 @@
 - install-atool-limit: an unknown UE4SS is refused (no more silent RevOG fallback); -InstallUnverified is required and the text says it may crash the game; -Force only skips the untested-Chrisr0 question. Wording fixed everywhere: a DLL on the wrong UE4SS may fail to load or crash (the names can resolve while the function table differs). Never mix builds.
 - release.ps1 asserts the RevOG DLL imports on_cpp_mods_loaded and the Chrisr0 DLL does not, so a stale or swapped DLL cannot ship; the Chrisr0 build script deletes stale outputs first.
 - Test: the installer's hash table must equal KNOWN_UE4SS + UNTESTED_UE4SS. NOTICE names the UE4SS copyright and the Chrisr0 fork. 'would NOT show up' is now 'may not show up'.
+
+## Digit-count re-slot: partner table fix (found in the Chrisr0 test, Run A)
+- A clip re-slotted 982 -> 1001 played, but Adam was missing: PEFA read 1 row in the 1001 partner table instead of 2. Cause: the slot string inside the DataTable rows grew by one character, but the enclosing StrProperty tag Size did not, so the engine lost its place and dropped the second (Adam) row. Same-digit moves never change string lengths, which is why moveslots (which refuses digit changes) was not affected.
+- iostore._fix_strings now patches the StrProperty tag Size when a string changes length and raises Unsupported if it cannot find that tag (never writes a stale Size). Tests: tagged-row walk, untagged refusal, same-digit layout unchanged.
+- try_rename still refuses digit-count changes until a corrected 1001 clip is verified in game (Adam visible).

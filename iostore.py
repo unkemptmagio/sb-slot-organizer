@@ -271,7 +271,18 @@ def _fix_strings(blob, old, new):
         text = blob[s:e].decode("ascii")
         text = re.sub(r"(%s)%s(a?)(?=[/.'|\"]|$)" % (re.escape(ANIM), re.escape(str(old))), lambda mm: mm.group(1) + str(new) + mm.group(2), text)
         text = re.sub(r"(%s)%s(a?)\.%s\2" % (re.escape(ANIM), str(new), re.escape(str(old))), lambda mm: mm.group(1) + str(new) + mm.group(2) + "." + str(new) + mm.group(2), text)
-        out += blob[last:s - 4] + struct.pack("<i", len(text) + 1) + text.encode("ascii") + b"\x00"; last = e + 1; pos = e + 1
+        delta = len(text) - (e - s)
+        if delta:
+            # A string that changes length must be a StrProperty value: its tag is [Size i32][ArrayIndex i32 = 0][HasGuid u8] right before the FString
+            # length field, and Size (= 4 + old length + 1) has to follow. Anything else is refused: a stale Size makes the engine lose its place
+            # (the partner table of a re-slotted clip lost its second row that way).
+            tag = s - 13
+            if tag < last or struct.unpack_from("<i", blob, tag)[0] != (e - s + 1) + 4 or struct.unpack_from("<i", blob, tag + 4)[0] != 0 or blob[tag + 8] not in (0, 1):
+                raise Unsupported("a slot string changes length outside a recognised string property")
+            out += blob[last:tag] + struct.pack("<i", (e - s + 1) + 4 + delta) + blob[tag + 4:s - 4]
+        else:
+            out += blob[last:s - 4]
+        out += struct.pack("<i", len(text) + 1) + text.encode("ascii") + b"\x00"; last = e + 1; pos = e + 1
     out += blob[last:]
     return bytes(out)
 

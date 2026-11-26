@@ -191,4 +191,20 @@ txt = lp.read_text(encoding="utf-8"); assert "SlotOrganizer " + S.VERSION in txt
 lp.write_bytes(b"x" * 600000); lf2 = S._open_log(str(lp), []); lf2.close(); assert (tmp / "logs" / "so.log.1").exists() and lp.stat().st_size < 1000
 S._Tee(None, io.StringIO()).write("no console")                                         # stdout None (windowless) must not crash
 (tmp / "blockfile").write_text("a file, not a folder"); assert S._open_log(str(tmp / "blockfile" / "x.log")) is None          # unwritable location: no crash
+
+
+# a slot string that changes length (982 -> 1001) must take its StrProperty tag Size with it, otherwise the engine loses the next row
+def _strprop(text):
+    b = text.encode() + b"\0"; return bytes(16) + struct.pack("<ii", 4 + len(b), 0) + b"\0" + struct.pack("<i", len(b)) + b
+_A = "/Game/Mods/HD-ATOOL_P/anim/"
+_row = _strprop("M|" + _A + "982a/Adam_MG_982.Adam_MG_982||0.0") + _strprop("B|RootSocket|" + _A + "982a/Adam_982.Adam_982||0.0")
+_out = I._fix_strings(_row, 982, 1001); _pos = 0; _n = 0
+while _pos < len(_out):
+    _size = struct.unpack_from("<i", _out, _pos + 16)[0]; _l = struct.unpack_from("<i", _out, _pos + 25)[0]
+    assert _size == 4 + _l and b"1001a" in _out[_pos:_pos + 29 + _l], "tag Size stale after a length-changing rewrite"; _pos += 29 + _l; _n += 1
+assert _n == 2 and _pos == len(_out) and len(I._fix_strings(_row, 982, 983)) == len(_row)             # same digit count: byte layout unchanged
+_bare = bytes(20) + struct.pack("<i", len(_A + "982a") + 1) + (_A + "982a").encode() + b"\0"           # valid FString, but no string property around it
+try: I._fix_strings(_bare, 982, 1001); assert 0
+except I.Unsupported as e: assert "recognised string property" in str(e)
+assert len(I._fix_strings(_bare, 982, 983)) == len(_bare)
 print("ok")
