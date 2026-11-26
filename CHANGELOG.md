@@ -15,3 +15,7 @@
 - Fixed: the long (>64 B) branch seeded w with z + y; the reference uses z + w.second. Now 3793/3793 stored hashes (65-232 B, 205 containers) match, so partner-table packs and long package names can be moved.
 - Fixed: chained moves of one pak overwrote its .orig backup; now .orig, .orig1, ... (test added).
 - Known limit: slot-keyed files (wav, PEFA names, PELA) stay with the pak that keeps the slot; if the moved pak owns them, rename by hand or re-slot via the port pipeline.
+
+## Slot-keyed files by owner
+- moveslots reads Vortex deployment manifests to learn which mod owns each wav / PELA file. Same source mod as the moved pak: renamed/rewritten even if the slot is shared. Another mod: left alone. Unknown owner on a shared slot: wav and PEFA name are copied to the new slot (PELA left alone). Unshared slot: renamed as before.
+- journal gained a copy step (reverted by deleting the copy); backup slots for saved files are unique per journal.

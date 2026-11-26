@@ -56,12 +56,12 @@ os.utime(paks / "~mods" / "two.utoc", (2e9, 2e9))                               
 inv = S.scan(paks); assert S.clashes(inv) == {700: ["~mods/one.utoc", "~mods/two.utoc"]}
 moves, unresolved = S.plan_moves(paks, inv, 1000, ()); assert moves == [("~mods/two.utoc", 700, 701)] and not unresolved, moves
 before = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (paks / "~mods").iterdir()}
-j = S.apply_move(paks, tmp, "~mods/two.utoc", 700, 701, tmp / "bk", rewrite=False)
+j = S.apply_move(paks, tmp, "~mods/two.utoc", 700, 701, tmp / "bk", shared=True)
 inv2 = S.scan(paks); assert not S.clashes(inv2) and inv2["~mods/two.utoc"] == [701] and inv2["~mods/one.utoc"] == [700]
 assert S.revert_move(tmp / "bk") == 2
 assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (paks / "~mods").iterdir()} == before   # byte-exact
 # chained moves of the same pak keep every original; reverting newest-first restores byte-exact
-S.apply_move(paks, tmp, "~mods/two.utoc", 700, 701, tmp / "c1", rewrite=False); S.apply_move(paks, tmp, "~mods/two.utoc", 701, 702, tmp / "c2", rewrite=False)
+S.apply_move(paks, tmp, "~mods/two.utoc", 700, 701, tmp / "c1", shared=True); S.apply_move(paks, tmp, "~mods/two.utoc", 701, 702, tmp / "c2", shared=True)
 S.revert_move(tmp / "c2"); S.revert_move(tmp / "c1")
 assert {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (paks / "~mods").iterdir()} == before
 # LogicMods never moves; a clash with only a LogicMods pak and a movable one moves the other
@@ -70,4 +70,25 @@ inv = S.scan(paks); mv, un = S.plan_moves(paks, inv, 1000, ())
 assert all(not k.startswith("LogicMods/") for k, _, _ in mv) and len(mv) == 2             # both ~mods paks move off 700, the LogicMods one keeps it
 # no free slot / reserved
 mv, un = S.plan_moves(paks, S.scan(paks), 700, set(range(1, 700))); assert un and not mv                          # nothing free: reported, not guessed
+# slot-keyed files: ownership from the Vortex manifest (mine / theirs), copy when unknown and shared, byte-exact revert
+import json, shutil
+g = tmp / "game"; pk = g / "Content" / "Paks"; au = pk / "LogicMods" / "HD-ATOOL_P" / "audio"; au.mkdir(parents=True)
+(g / "Binaries/Win64/ue4ss/Mods/PEFA").mkdir(parents=True); (pk / "~mods" / "PELA Patches").mkdir(parents=True)
+(au / "800.wav").write_bytes(b"A"); (au / "801.wav").write_bytes(b"B"); (g / "Binaries/Win64/ue4ss/Mods/PEFA/names.txt").write_text("800 = Mine\n801 = Other\n")
+(pk / "~mods" / "PELA Patches" / "m.json").write_text(json.dumps({"x": {"clip": 800, "singles": [800, 5]}}))
+nc = os.path.normcase
+man = {"targetPath": str(pk), "files": [{"relPath": "LogicMods/HD-ATOOL_P/audio/800.wav", "source": "modA"}, {"relPath": "LogicMods/HD-ATOOL_P/audio/801.wav", "source": "modB"}, {"relPath": "~mods/PELA Patches/m.json", "source": "modA"}]}
+(pk / "vortex.deployment.x.json").write_text(json.dumps(man)); sr = S.sources(pk)
+assert sr[nc(str(au / "800.wav"))] == "modA" and S.owner(au / "801.wav", "modA", sr, True) == "theirs" and S.owner(au / "x.wav", None, {}, True) == "unknown" and S.owner(au / "x.wav", None, {}, False) == "mine"
+snap = lambda: {str(p): p.read_bytes() for p in g.rglob("*") if p.is_file()}
+b0 = snap(); st = []
+S.external_files(g, 800, 810, st, tmp / "fb", shared=True, mover="modA", srcs=sr)   # modA owns 800.wav + PELA: renamed even though the slot is shared; names line copied
+assert (au / "810.wav").exists() and not (au / "800.wav").exists() and "810" in (g / "Binaries/Win64/ue4ss/Mods/PEFA/names.txt").read_text() and "800 = Mine" in (g / "Binaries/Win64/ue4ss/Mods/PEFA/names.txt").read_text()
+assert json.loads((pk / "~mods/PELA Patches/m.json").read_text())["x"]["clip"] == 810
+S.external_files(g, 801, 811, st, tmp / "fb", shared=True, mover="modA", srcs=sr)   # modB owns 801.wav: untouched
+assert (au / "801.wav").exists() and not (au / "811.wav").exists()
+S.external_files(g, 801, 812, st, tmp / "fb2", shared=True, mover=None, srcs={})    # no manifest, shared: wav copied
+assert (au / "801.wav").exists() and (au / "812.wav").exists()
+j = {"steps": st}; (tmp / "fb").mkdir(exist_ok=True); (tmp / "fb" / "manifest.json").write_text(json.dumps(j)); S.revert_move(tmp / "fb")
+assert not (au / "812.wav").exists() and snap() == b0                                 # everything back
 print("ok")

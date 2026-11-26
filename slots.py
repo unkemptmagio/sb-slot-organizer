@@ -266,30 +266,57 @@ def plan_moves(root, inv, ceiling=1000, reserved=(), mtimes=None):
         if len(remaining) > 1: unresolved.append((slot, remaining, reasons or ["only LogicMods packs involved"]))
     return moves, unresolved
 
-def external_files(game, old, new, apply_to=None, backup=None, rewrite=True):
-    """slot-keyed files outside the pak. Returns a list of (what, path); with backup set, edits them (originals saved)."""
+def sources(paks):
+    """{normalized absolute path: source mod} from Vortex deployment manifests under Paks (empty if Vortex is not used)"""
+    import json
+    out = {}
+    for m in pathlib.Path(paks).rglob("vortex.deployment.*.json"):
+        try: j = json.loads(m.read_text(encoding="utf-8"))
+        except (OSError, ValueError): continue
+        base = pathlib.Path(j.get("targetPath") or m.parent)
+        for f in j.get("files", []):
+            if f.get("relPath") and f.get("source"): out[os.path.normcase(str(base / (f.get("target") or "") / f["relPath"]))] = f["source"]
+    return out
+
+def owner(path, mover, srcs, shared):
+    """who a slot-keyed file belongs to, as seen from the pak being moved: 'mine' | 'theirs' | 'unknown'.
+    Known from Vortex's manifest (same source mod as the pak = mine); without it a slot used by only this pak is mine, a shared one is unknown."""
+    own = srcs.get(os.path.normcase(str(path)))
+    if own and mover: return "mine" if own == mover else "theirs"
+    return "unknown" if shared else "mine"
+
+def external_files(game, old, new, apply_to=None, backup=None, shared=False, mover=None, srcs=None):
+    """slot-keyed files outside the pak. Returns a list of (what, path); with backup set, edits them (originals saved).
+    mine -> renamed/rewritten; theirs -> left alone; unknown -> wav and PEFA name are COPIED to the new slot (harmless), PELA left alone."""
     import json, shutil
-    game = pathlib.Path(game); out = []
+    game = pathlib.Path(game); out = []; srcs = srcs or {}
     def save(p):
-        d = pathlib.Path(backup) / "files" / ("%d" % len(out)); d.mkdir(parents=True, exist_ok=True); shutil.copy2(p, d / p.name); return d / p.name
+        fd = pathlib.Path(backup) / "files"; fd.mkdir(parents=True, exist_ok=True)
+        d = fd / ("%d" % len(list(fd.iterdir()))); d.mkdir()                # unique per saved file, even across calls into one journal
+        shutil.copy2(p, d / p.name); return d / p.name
     audio = game / "Content" / "Paks" / "LogicMods" / "HD-ATOOL_P" / "audio"
     for p in (audio.glob("%d.*" % old) if audio.is_dir() else []):
         if p.suffix.lower() == ".wav" and p.stem == str(old):
-            dst = p.with_name("%d%s" % (new, p.suffix))
-            if not rewrite: out.append(("note: %s kept (slot %d is still used by another pack)" % (p.name, old), p)); continue
-            if dst.exists(): out.append(("wav not renamed: %s exists" % dst.name, p)); continue
-            out.append(("wav %s -> %s" % (p.name, dst.name), p))
-            if backup: p.rename(dst); apply_to is not None and apply_to.append({"kind": "rename", "from": str(p), "to": str(dst)})
+            dst = p.with_name("%d%s" % (new, p.suffix)); who = owner(p, mover, srcs, shared)
+            if who == "theirs": out.append(("note: %s kept (belongs to another mod)" % p.name, p)); continue
+            if dst.exists(): out.append(("wav not moved: %s exists" % dst.name, p)); continue
+            if who == "mine":
+                out.append(("wav %s -> %s" % (p.name, dst.name), p))
+                if backup: p.rename(dst); apply_to is not None and apply_to.append({"kind": "rename", "from": str(p), "to": str(dst)})
+            else:
+                out.append(("wav %s copied to %s (owner unknown, slot shared)" % (p.name, dst.name), p))
+                if backup: shutil.copy2(p, dst); apply_to is not None and apply_to.append({"kind": "copy", "to": str(dst)})
     pefa = game / "Binaries" / "Win64" / "ue4ss" / "Mods" / "PEFA"
     names = pefa / "names.txt"
     if names.is_file():
-        txt = names.read_text(encoding="utf-8", errors="replace")
-        if re.search(r"(?m)^%d\s*=" % old, txt) and not rewrite: out.append(("note: PEFA names.txt line %d kept (slot still used by another pack)" % old, names))
-        elif re.search(r"(?m)^%d\s*=" % old, txt):
-            out.append(("PEFA names.txt line %d -> %d" % (old, new), names))
+        txt = names.read_text(encoding="utf-8", errors="replace"); m = re.search(r"(?m)^%d(\s*=.*)$" % old, txt)
+        if m and not re.search(r"(?m)^%d\s*=" % new, txt):
+            if shared:                                              # PEFA's names.txt has no owner: keep the old line, add one for the new slot
+                out.append(("PEFA names.txt: line %d copied to %d (slot shared)" % (old, new), names)); edit = lambda t: re.sub(r"(?m)^(%d)(\s*=.*)$" % old, lambda mm: mm.group(0) + "\n" + str(new) + mm.group(2), t, count=1)
+            else:
+                out.append(("PEFA names.txt line %d -> %d" % (old, new), names)); edit = lambda t: re.sub(r"(?m)^%d(\s*=)" % old, lambda mm: str(new) + mm.group(1), t)
             if backup:
-                b = save(names); apply_to.append({"kind": "file", "path": str(names), "backup": str(b)})
-                names.write_text(re.sub(r"(?m)^%d(\s*=)" % old, lambda m: str(new) + m.group(1), txt), encoding="utf-8", newline="")
+                b = save(names); apply_to.append({"kind": "file", "path": str(names), "backup": str(b)}); names.write_text(edit(txt), encoding="utf-8", newline="")
     for nm in ("packs_rows.txt", "packs_cache.txt"):
         p = pefa / nm
         if p.is_file():
@@ -311,15 +338,16 @@ def external_files(game, old, new, apply_to=None, backup=None, rewrite=True):
             elif isinstance(o, list):
                 for x in o: walk(x)
         walk(doc)
-        if hit[0] and not rewrite: out.append(("note: PELA %s keeps %d reference(s) to slot %d (still used by another pack)" % (p.name, hit[0], old), p))
-        elif hit[0]:
-            out.append(("PELA %s: %d reference(s)" % (p.name, hit[0]), p))
-            if backup:
-                b = save(p); apply_to.append({"kind": "file", "path": str(p), "backup": str(b)})
-                p.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        if not hit[0]: continue
+        who = owner(p, mover, srcs, shared)
+        if who != "mine": out.append(("note: PELA %s keeps %d reference(s) to slot %d (%s)" % (p.name, hit[0], old, "belongs to another mod" if who == "theirs" else "owner unknown, slot shared"), p)); continue
+        out.append(("PELA %s: %d reference(s)" % (p.name, hit[0]), p))
+        if backup:
+            b = save(p); apply_to.append({"kind": "file", "path": str(p), "backup": str(b)})
+            p.write_text(json.dumps(doc, indent=1), encoding="utf-8")
     return out
 
-def apply_move(root, game, key, old, new, backup, rewrite=True):
+def apply_move(root, game, key, old, new, backup, shared=False):
     """rewrite the container of `key` (slot old -> new), swap it in, edit slot-keyed files; journal first. Returns the journal dict."""
     import iostore, json, os
     root = pathlib.Path(root); backup = pathlib.Path(backup); backup.mkdir(parents=True, exist_ok=True)
@@ -342,7 +370,8 @@ def apply_move(root, game, key, old, new, backup, rewrite=True):
     os.replace(utoc, bt); os.replace(ucas, bu)                          # originals renamed to *.orig next to the pak (same volume, instant, not mountable; a hard link to Vortex staging stays intact)
     os.replace(nt, utoc); os.replace(nu, ucas)
     j["steps"] += [{"kind": "swap", "path": str(utoc), "backup": str(bt)}, {"kind": "swap", "path": str(ucas), "backup": str(bu)}]
-    external_files(game, old, new, j["steps"], backup, rewrite)
+    srcs = sources(root)
+    external_files(game, old, new, j["steps"], backup, shared, srcs.get(os.path.normcase(str(utoc))), srcs)
     (backup / "manifest.json").write_text(json.dumps(j, indent=1))
     return j
 
@@ -354,6 +383,8 @@ def revert_move(backup):
         if st["kind"] == "swap": os.replace(st["backup"], st["path"]); n += 1
         elif st["kind"] == "rename":
             if pathlib.Path(st["to"]).exists() and not pathlib.Path(st["from"]).exists(): os.replace(st["to"], st["from"]); n += 1
+        elif st["kind"] == "copy":
+            if pathlib.Path(st["to"]).exists(): os.unlink(st["to"]); n += 1
         elif st["kind"] == "file": shutil.copy2(st["backup"], st["path"]); n += 1
     return n
 
@@ -406,15 +437,17 @@ def main(argv):
         for slot, ps, why in unresolved:
             print("  slot %d cannot be fixed automatically (%s):" % (slot, " | ".join(ps)))
             for w in why: print("      " + w)
-        def owned_alone(k, o): return not any(o in v for kk, v in inv.items() if kk != k)
+        srcs = sources(paks)
+        def shared(k, o): return any(o in v for kk, v in inv.items() if kk != k)
+        def mover(k): return srcs.get(os.path.normcase(str(paks / k)))
         for k, o, n in moves:
             print("  %s: slot %d -> %d" % (k, o, n))
-            for what, _p in external_files(g, o, n, rewrite=owned_alone(k, o)): print("      " + what)
+            for what, _p in external_files(g, o, n, shared=shared(k, o), mover=mover(k), srcs=srcs): print("      " + what)
         if not moves: print("nothing to move"); return 1 if unresolved else 0
         if not a.apply: print("dry run: %d move(s) (add --apply, close the game first)" % len(moves)); return 1
         if "SB-Win64-Shipping.exe" in subprocess.run(["tasklist"], capture_output=True, text=True).stdout: print("Stellar Blade is running: close it first"); return 2
         bk = "%s/move-%s" % (a.backup, _t.strftime("%Y%m%d-%H%M%S"))
-        for i, (k, o, n_) in enumerate(moves): apply_move(paks, g, k, o, n_, "%s-%d" % (bk, i), rewrite=owned_alone(k, o))
+        for i, (k, o, n_) in enumerate(moves): apply_move(paks, g, k, o, n_, "%s-%d" % (bk, i), shared=shared(k, o))
         print("moved %d slot(s); undo with: python slots.py revert (backup %s-*)" % (len(moves), bk)); return 0
     if a.cmd == "plan":
         mv = plan(inv, a.ceiling, reserved=load_reserved(a.reserved))
