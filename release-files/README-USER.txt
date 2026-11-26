@@ -97,8 +97,7 @@ IF SOMETHING GOES WRONG
 Every run writes a plain-text log: %LOCALAPPDATA%\SlotOrganizer\logs\slotorganizer.log
 (previous one: slotorganizer.log.1). The tool prints its path when a run fails. To see the path
 and the last lines:  SlotOrganizer.exe log
-When you ask for help, attach that file. It contains the paths of your game and mod folders and
-what the tool printed - read it first if that matters to you - (paths can include your Windows user name, plus the file names of your mods) and no passwords.
+When you ask for help, attach that file. It contains what the tool printed: the paths of your game and mod folders (which can include your Windows user name) and the file names of your mods - read it first if that matters to you. It contains no passwords.
 First try Undo-last-run.bat, then ask.
 
 IF THE OPTIONAL MOD DOES NOT WORK (AToolSlotLimit)

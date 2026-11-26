@@ -107,3 +107,9 @@ Entries are in development order; later sections are the final state (superseded
 - Project rule recorded in D:\Projects\AGENTS.md (every mod and tool needs a persistent log, startup host/version lines, no silent waits, an 'If something goes wrong' section). SlotOrganizer already complies; AToolSlotLimit is partial (documented, DLL change pending an in-game re-test).
 - README-USER.txt and the packaged AToolSlotLimit README gained troubleshooting for the optional mod (log location, working lines, failure signatures, what to attach).
 - release.ps1 writes the zip entries by hand: one top-level folder, forward-slash names, asserted.
+
+## 1.0.0 - round 6 review fixes
+- Undo: PEFA caches the move removed are removed again on undo (the game rebuilds them; a newer cache is never replaced by the old one). Every undo step is isolated: a missing folder or a deleted .orig is reported and counted as kept (exit 3, journal kept as manifest.partial.json) and the other steps still run, so undo can no longer get stuck or claim success.
+- The log path is printed after every failure (including string error messages), not only after odd exit codes.
+- Every run logs an identity line: game folder, UE4SS build (tested or sha256), AToolSlotLimit state, slot ceiling and its source. The double-click header shows the real command; the `log` command no longer writes into the log.
+- Installer: clear message when UE4SS.dll is missing; release.ps1 requires git.

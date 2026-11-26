@@ -2,6 +2,7 @@
 param([string]$Game = $(if ($env:SB_GAME) { $env:SB_GAME } else { "E:\SteamLibrary\steamapps\common\StellarBlade\SB" }))
 function Run($what, [scriptblock]$cmd) { & $cmd; if ($LASTEXITCODE) { throw "$what failed (exit $LASTEXITCODE)" } }
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw "python not found on PATH" }
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "git not found on PATH" }
 if (git status --porcelain) { throw "uncommitted changes: commit first so the zip matches the repository" }
 Run "slots_test" { python tests\slots_test.py }
 Run "iostore_test" { python tests\iostore_test.py }

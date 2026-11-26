@@ -159,7 +159,17 @@ def detect_ceiling(game, known=None):
     except (OSError, ValueError): pass
     return max(1000, lim)                            # limit=1000 means "leave ATOOL as is"
 
-_NOTED = []
+_NOTED = []; _IDENT = []
+
+def identity_line(game, ceiling, explicit):
+    """one line for the log: what this run is looking at (so a log from a 'nothing happened' run can be told from a wrong-install run)"""
+    h = _ue4ss_hash(game); name = KNOWN_UE4SS.get(h) if h else None
+    ue = "%s (the tested build)" % name if name else ("not the tested build, sha256 %s..." % h[:12] if h else "UE4SS.dll not found")
+    d = pathlib.Path(game) / "Binaries" / "Win64" / "ue4ss" / "Mods" / "AToolSlotLimit"
+    if (d / "dlls" / "main.dll").is_file():
+        en = d / "enabled.txt"; mod = "installed, " + ("disabled" if en.is_file() and en.read_text(errors="replace").strip() == "0" else "enabled")
+    else: mod = "not installed"
+    return "game: %s | UE4SS: %s | AToolSlotLimit: %s | slot ceiling %d (%s)" % (game, ue, mod, ceiling, "--ceiling" if explicit else "auto")
 
 def ceiling_warning(game, ceiling):
     """a note when the ceiling in use is higher than what will work in game, or when the mod is installed but cannot be trusted"""
@@ -529,8 +539,9 @@ def apply_move(root, game, key, old, new, backup, shared=False, srcs=None):
 
 def revert_move(backup):
     """undo a move journal: put the original files back, newest step first. Tolerates steps that never happened and repeated calls.
-    A file that changed since the tool wrote it (re-deployed mod, edited names.txt) is NOT overwritten: it is reported and its backup kept.
-    Returns the number of steps undone."""
+    A file that changed since the tool wrote it (re-deployed mod, edited names.txt) is NOT overwritten. Every step is isolated: one that
+    cannot be undone (folder gone, original deleted) is reported and counted as kept, and the others still run. Returns the steps undone;
+    revert_move.kept = steps that could not be undone (the journal is then kept as manifest.partial.json)."""
     import json, shutil
     backup = pathlib.Path(backup); mp = backup / "manifest.json"
     if not mp.exists(): return 0
@@ -540,23 +551,30 @@ def revert_move(backup):
             print("  not restored (changed since the move): %s" % path); return True
         return False
     for st in reversed(j["steps"]):
-        if st["kind"] == "swap":
-            if os.path.exists(st["backup"]):
+        try:
+            if st["kind"] == "swap":
+                if os.path.exists(st["backup"]):
+                    if changed(st, st["path"]): kept += 1; continue
+                    os.replace(st["backup"], st["path"]); n += 1
+                elif st.get("sig") is not None:                         # the swap was completed, but the saved original is gone
+                    print("  cannot restore %s: the saved original %s is missing" % (st["path"], st["backup"])); kept += 1
+            elif st["kind"] == "rename":
+                if pathlib.Path(st["to"]).exists() and not pathlib.Path(st["from"]).exists(): os.replace(st["to"], st["from"]); n += 1
+            elif st["kind"] == "copy":
+                if pathlib.Path(st["to"]).exists():
+                    if changed(st, st["to"]): kept += 1; continue
+                    os.unlink(st["to"]); n += 1
+            elif st["kind"] == "file":
+                if st.get("deleted"):                                   # a cache the tool removed: the game rebuilt it for the moved layout - remove it again, the game rebuilds it
+                    if os.path.exists(st["path"]): os.unlink(st["path"]); n += 1
+                    continue
+                if not os.path.exists(st["backup"]): continue
+                if not os.path.isdir(os.path.dirname(st["path"])): print("  not restored (its folder no longer exists): %s" % st["path"]); kept += 1; continue
+                if st.get("sig") is None and os.path.exists(st["path"]): print("  not restored (recreated since the move): %s" % st["path"]); kept += 1; continue
                 if changed(st, st["path"]): kept += 1; continue
-                os.replace(st["backup"], st["path"]); n += 1
-        elif st["kind"] == "rename":
-            if pathlib.Path(st["to"]).exists() and not pathlib.Path(st["from"]).exists(): os.replace(st["to"], st["from"]); n += 1
-        elif st["kind"] == "copy":
-            if pathlib.Path(st["to"]).exists():
-                if changed(st, st["to"]): kept += 1; continue
-                os.unlink(st["to"]); n += 1
-        elif st["kind"] == "file":
-            if not os.path.exists(st["backup"]): continue
-            if st.get("deleted"):                                       # a cache the tool removed: the game rebuilt it for the moved layout, the saved original matches the restored paks
-                shutil.copy2(st["backup"], st["path"]); n += 1; continue
-            if st.get("sig") is None and os.path.exists(st["path"]): print("  not restored (recreated since the move): %s" % st["path"]); kept += 1; continue
-            if changed(st, st["path"]): kept += 1; continue
-            shutil.copy2(st["backup"], st["path"]); n += 1
+                shutil.copy2(st["backup"], st["path"]); n += 1
+        except OSError as e:
+            print("  could not undo %s: %s" % (st.get("path") or st.get("to") or st.get("from"), e)); kept += 1
     revert_move.kept = kept
     os.replace(mp, backup / ("manifest.partial.json" if kept else "manifest.reverted.json"))
     return n
@@ -642,7 +660,9 @@ def main(argv):
         if r2 >= 2: return r2
         if os.path.isdir(a.backup) and any(os.path.basename(d).endswith(run) or run in d for d in os.listdir(a.backup)): print("\nUndo this run with: SlotOrganizer.exe revert")
         return 0
+    explicit = a.ceiling is not None
     if a.ceiling is None: a.ceiling = detect_ceiling(g)
+    if not _IDENT: _IDENT.append(1); print(identity_line(g, a.ceiling, explicit))
     w = ceiling_warning(g, a.ceiling)
     if w and not _NOTED:
         _NOTED.append(1); print(w)                         # once per run, even when auto calls main twice
@@ -746,22 +766,30 @@ def _open_log(path, argv=None, keep=512 * 1024):
         return f
     except OSError: return None
 
+def _failure_footer(rc, failed, log_path):
+    """the line that points a user at the log: after any exception or error message, and after exit codes other than 0 (done) and 1 (dry run / nothing to do / cancelled)"""
+    if log_path and (failed or rc not in (0, 1)): return "\nSomething did not go as planned. If you ask for help, attach this log file:\n  %s" % log_path
+    return ""
+
 def _cli():
     global LOG_PATH
     for st in (sys.stdout, sys.stderr):
         try: st.reconfigure(errors="replace")                 # odd characters in paths must never crash printing
         except (AttributeError, ValueError, OSError): pass
-    lf = _open_log(_log_default(), sys.argv[1:])
+    argv = sys.argv[1:] or ["auto"]
+    lf = None if argv[:1] == ["log"] else _open_log(_log_default(), argv if sys.argv[1:] else ["auto", "(double-click)"])   # showing the log must not write into it
     if lf: LOG_PATH = _log_default(); sys.stdout = _Tee(sys.stdout, lf); sys.stderr = _Tee(sys.stderr, lf)
     dbl = len(sys.argv) == 1                         # double-clicked exe: find clashes, show them, ask, fix, wait
-    try: rc = main(sys.argv[1:] or ["auto"])
+    failed = False
+    try: rc = main(argv)
     except SystemExit as e:
         rc = e.code if isinstance(e.code, int) else 1
-        if isinstance(e.code, str): print(e.code)
+        if isinstance(e.code, str): print(e.code); failed = True
     except KeyboardInterrupt: print("interrupted"); rc = 130
     except BaseException:
-        import traceback; traceback.print_exc(); print("\nUnexpected error. Nothing is left half-done unless the line above says so; `SlotOrganizer.exe revert` undoes the last run." + ("\nIf you ask for help, attach this log file:\n  %s" % LOG_PATH if LOG_PATH else "")); rc = 1
-    if LOG_PATH and rc not in (0, 1): print("\nSomething did not go as planned. If you ask for help, attach this log file:\n  %s" % LOG_PATH)
+        import traceback; traceback.print_exc(); print("\nUnexpected error. Nothing is left half-done unless the line above says so; `SlotOrganizer.exe revert` undoes the last run."); rc = 1; failed = True
+    foot = _failure_footer(rc, failed, LOG_PATH)
+    if foot: print(foot)
     if dbl and getattr(sys, "frozen", False):
         try: input("\nPress Enter to close")
         except (EOFError, RuntimeError, OSError): pass

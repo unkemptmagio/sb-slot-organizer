@@ -17,7 +17,8 @@ try {
     $have = if (Test-Path -LiteralPath $ueDll) { (Get-FileHash -LiteralPath $ueDll -Algorithm SHA256).Hash } else { "" }
     if ($have -ne $known) {
         Write-Host "This mod was tested ONLY with RevOG SB-UE4SS 1.3 (ue4ss\UE4SS.dll SHA-256 $known)."
-        Write-Host "Your UE4SS.dll is different, so the mod is unsupported on it and may crash the game at launch (a test on Chrisr0/RE-UE4SS 3.1.0-5 crashed). Slots above 1000 will not work and SlotOrganizer keeps everything within 1..1000."
+        if ($have) { Write-Host "Your UE4SS.dll is different, so the mod is unsupported on it and may crash the game at launch (a test on Chrisr0/RE-UE4SS 3.1.0-5 crashed). Slots above 1000 will not work and SlotOrganizer keeps everything within 1..1000." }
+        else { Write-Host "No UE4SS.dll was found at $ueDll, so the mod cannot be checked and is unsupported here." }
         if (-not $InstallUnverified) { throw "refused: unsupported UE4SS build (-InstallUnverified installs it anyway, at your own risk)" }
     }
     $src = Join-Path $PSScriptRoot "AToolSlotLimit"
@@ -33,7 +34,7 @@ try {
     if ($have -eq $known) { Write-Host "Installed to $dest (your UE4SS is RevOG SB-UE4SS 1.3, the tested one)" }
     else { Write-Host "Installed to $dest ON AN UNSUPPORTED UE4SS (-InstallUnverified): it may crash the game at launch - delete the folder if it does." }
     if ((Test-Path -LiteralPath (Join-Path $dest "enabled.txt")) -and ((Get-Content -LiteralPath (Join-Path $dest "enabled.txt") -Raw).Trim() -eq "0")) { Write-Host "Note: enabled.txt is 0, so the mod stays OFF until you set it to 1." }
-    Write-Host "Settings: config.txt (limit=9999), enabled.txt (1 = on, 0 = off). Delete the folder to uninstall."
+    Write-Host "Settings: config.txt (limit=NNNN; the default package says 9999), enabled.txt (1 = on, 0 = off). Delete the folder to uninstall."
     Write-Host "If the game crashes at launch after this, delete the folder."
 } catch {
     $hint = if ($_.Exception -is [System.IO.IOException] -or $_.Exception -is [System.UnauthorizedAccessException]) { "  (close the game first if a file is locked)" } else { "" }
