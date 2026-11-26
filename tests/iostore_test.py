@@ -3,7 +3,7 @@ import sys, pathlib, tempfile, struct, hashlib, os, json
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import iostore as I, slots as S
 
-def make_pak(d, name, slot, cid=0x1122334455667788, extra=b"", dirs_in_mount=True, bulk=False):
+def make_pak(d, name, slot, cid=0x1122334455667788, extra=b"", dirs_in_mount=True, bulk=False, bext=".ubulk"):
     """one anim clip package at /Game/Mods/HD-ATOOL_P/anim/<slot>, as UnrealPak would lay it out"""
     pkg = f"/Game/Mods/HD-ATOOL_P/anim/{slot}"
     names = ["/Engine/Animation/Foo", pkg, str(slot), "Class", "AnimSequence"]
@@ -18,8 +18,8 @@ def make_pak(d, name, slot, cid=0x1122334455667788, extra=b"", dirs_in_mount=Tru
     h = bytearray(144); h[:16] = I.MAGIC; h[16] = 2; struct.pack_into("<IIIIIII", h, 20, 144, 2, 2, 12, 0, 32, 65536); h[80] = 8
     c = I.Container(); c.header = h; c.block_size = 65536; c.container_id = cid; c.block_align = 16
     mk = lambda i, t, dta: dict(id=i, index=0, pad=0, type=t, data=dta, meta_flags=0, meta_pad=bytes(12), meta_hash=b"", sha_ok=True, dirty=False)
-    c.chunks = [mk(cid, 10, hdr), mk(pid, 2, data)] + ([mk(pid, 3, b"BULKDATA" * 64)] if bulk else [])
-    c.dirindex = dict(mount="../../../SB/Content/Mods/HD-ATOOL_P/anim/", mount_kind=1, dirs=[[0xFFFFFFFF] * 3 + [0]], files=[[0, 1 if bulk else 0xFFFFFFFF, 1]] + ([[1, 0xFFFFFFFF, 2]] if bulk else []), strings=[f"{slot}.uasset"] + ([f"{slot}.ubulk"] if bulk else []), kinds=[1] * (2 if bulk else 1))
+    c.chunks = [mk(cid, 10, hdr), mk(pid, 2, data)] + ([mk(pid, 5 if bext == ".m.ubulk" else 3, b"BULKDATA" * 64)] if bulk else [])
+    c.dirindex = dict(mount="../../../SB/Content/Mods/HD-ATOOL_P/anim/", mount_kind=1, dirs=[[0xFFFFFFFF] * 3 + [0]], files=[[0, 1 if bulk else 0xFFFFFFFF, 1]] + ([[1, 0xFFFFFFFF, 2]] if bulk else []), strings=[f"{slot}.uasset"] + ([f"{slot}{bext}"] if bulk else []), kinds=[1] * (2 if bulk else 1))
     t, u = I.container_bytes(c); (d / (name + ".utoc")).write_bytes(t); (d / (name + ".ucas")).write_bytes(u)
     return d / (name + ".utoc")
 
@@ -161,11 +161,26 @@ assert not S.clashes(S.scan(sb2 / "Content" / "Paks")) and not S.id_clashes(sb2 
 assert S.main(["revert"] + args2) == 0                                                  # one revert undoes the whole run
 assert {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in pm2.iterdir()} == h2, "revert after auto did not restore"
 # interrupted-run detection and stale temp sweep
-(pm2 / "x.utoc.new").write_bytes(b"junk"); (pm2 / "y.new.ucas").write_bytes(b"junk"); assert sorted(S.sweep_temp(sb2 / "Content" / "Paks")) == ["x.utoc.new", "y.new.ucas"]
+(pm2 / "x.utoc.new").write_bytes(b"junk"); (pm2 / "y.new.ucas").write_bytes(b"junk"); assert sorted(S.sweep_temp(sb2 / "Content" / "Paks")) == ["x.utoc.new"] and (pm2 / "y.new.ucas").exists()      # only our own temp name is swept
 os.makedirs(tmp / "ib" / "move-20260101-000000-0"); (tmp / "ib" / "move-20260101-000000-0" / "manifest.json").write_text('{"steps": [], "done": false}')
 assert S.interrupted(str(tmp / "ib")) and not S.interrupted(str(tmp / "none"))
 # short-input branches (0-16, 17-32, 33-64), unconditional: real stored hashes + the real package id of anim/982 (60 bytes of UTF-16)
 KAT_SHORT = [('2', 6920640749119438759), ('wb', 13859483922156345979), ('top', 2125795074522444111), ('font', 4674223610502732611), ('class', 7772006167705430957), ('content', 11758975885699655676), ('bindings', 18242279994439662761), ('bautosize', 12257212597591960947), ('canvaspanelslot', 17824498634351576271), ('eslatevisibility', 12978709467158065097), ('horizontalboxslot', 1518588668669284949), ('default__canvaspanelslot', 8885987693529693801), ('eslatecheckboxtype::togglebutton', 13553808718295507493), ('/game/mods/darui_p/cursor_default', 17311069008932939833), ('/game/mods/hd-atool_p/p901/newmale_mesh_skeleton', 16315670706392073306), ('/game/art/bg/actor/interaction/wine_bottle/wine_bottle_skeleton', 7100514524833140975), ('/game/art/character/monster/ch_m_na_19/materials/mi_m_na_19_body', 9034285803720795553)]
 assert all(I.cityhash64(k.encode()) == h for k, h in KAT_SHORT), "CityHash64 short branches regressed"
 assert I.package_id("/Game/Mods/HD-ATOOL_P/anim/982") == 3876099187860792978
+# .m.ubulk (memory-mapped bulk) must parse as <slot>.m.ubulk, not <slot>.m
+bm = make_pak(tmp, "mbulk", 780, cid=22, bulk=True, bext=".m.ubulk"); cm = I.read_container(bm); assert not I.check_container(cm), I.check_container(cm)
+I.rename_slot(cm, 780, 781); assert not I.check_container(cm) and "781.m.ubulk" in cm.dirindex["strings"]
+# a mod literally named X.new.utoc is never swept or hidden; our own temp names are
+(pm2 / "Hair.new.utoc").write_bytes(b"user file"); (pm2 / "Hair.new.ucas").write_bytes(b"user file"); (pm2 / "z.utoc.new").write_bytes(b"tmp")
+assert S.sweep_temp(sb2 / "Content" / "Paks") == ["z.utoc.new"] and (pm2 / "Hair.new.utoc").exists()
+# orphan anim utoc (no ucas) in an id-clash group: skipped, not a crash
+(pm2 / "orph.utoc").write_bytes((pm2 / "one.utoc").read_bytes()); assert S.id_sites(pm2 / "orph.utoc") is None
+os.remove(pm2 / "orph.utoc")
+# patching a container id keeps the file times, so an earlier move's revert still recognises the file
+ms = S.apply_move(pm2, sb2, "one.utoc", 700, 703, tmp / "mt1", shared=False)
+t_before = (os.stat(pm2 / "one.utoc").st_mtime_ns, os.stat(pm2 / "one.ucas").st_mtime_ns)
+S.apply_fix(pm2, [("one.utoc", 77, 0x1234567890ABCDEF)], tmp / "mt2")
+assert (os.stat(pm2 / "one.utoc").st_mtime_ns, os.stat(pm2 / "one.ucas").st_mtime_ns) == t_before
+S.revert_fix(tmp / "mt2"); assert S.revert_move(tmp / "mt1") >= 2 and not getattr(S.revert_move, "kept", 0)
 print("ok")

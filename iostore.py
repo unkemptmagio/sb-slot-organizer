@@ -284,7 +284,7 @@ def packages_of(c):
             except (Unsupported, struct.error, IndexError, UnicodeDecodeError): out[i] = None
     return out
 
-BULK_EXTS = (".ubulk", ".uptnl", ".m.ubulk")      # chunk files that hang off a package and carry its id
+BULK_EXTS = (".m.ubulk", ".uptnl", ".ubulk")      # chunk files that hang off a package and carry its id
 
 def path_names(c, ext=".uasset"):
     """{chunk index: package name derived from the directory index path}. The chunk id is the hash of THIS name; the name stored inside

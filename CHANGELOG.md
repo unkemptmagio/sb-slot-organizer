@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 ## Unreleased
 - scan, plan, per-pak cache, Steam detection (read-only).
@@ -36,7 +36,7 @@
 ## 1.0.0 - release hardening
 - Bulk data (.ubulk) of a moved package follows it (chunk id, directory entry, check); legacy .pak mods get a clear message.
 - CityHash64 known-answer vectors (real stored hashes, 65..232 B incl. 128/192) in the tests.
-- uto command (double-click): moves slots and fixes container ids, asking first; --yes, --version; first-run note when no mod manager manifest exists.
+- `auto` command (double-click): moves slots and fixes container ids, asking first; --yes, --version; first-run note when no mod manager manifest exists.
 - End-to-end test: auto + revert on a fake game folder.
 - release.ps1, README-USER.txt, install-atool-limit.ps1.
 
@@ -48,3 +48,11 @@
 - Bulk data of other kinds (.uptnl, .m.ubulk) follows its package and is checked; renamed bulk chunks keep their stored hash.
 - Known-answer CityHash64 vectors for every branch (1..64 B and 65..232 B), unconditional.
 - install-atool-limit: never overwrites config/enabled, both UE4SS layouts, verifies the copy, .bat wrapper; release.ps1 ships canonical config, checks the built exe version and the dll.
+
+## 1.0.0 - round 4 review fixes
+- The temp sweep only removes this tool's own names (x.utoc.new / x.ucas.new); a mod literally named X.new.utoc is never touched or hidden from scan.
+- Patching a container id keeps the files' modified times, so reverting an earlier slot move of the same pak still recognises the file (chained runs revert cleanly).
+- id journals carry a done flag and an interrupted id patch is flagged like an interrupted move; apply_fix rolls back on Ctrl-C too; orphan or truncated paks are skipped instead of crashing.
+- An interrupted run can be undone from the double-click window (offered by auto) or with Undo-last-run.bat.
+- .m.ubulk is parsed correctly (longest extension first); printing paths with odd characters cannot crash; Steam library paths are read as UTF-8.
+- install-atool-limit uses -LiteralPath; release.ps1 now throws on any failed step, smoke-tests the built exe, removes stale zips and verifies the zip contents.

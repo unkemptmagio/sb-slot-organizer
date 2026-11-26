@@ -12,7 +12,7 @@ Moving a third-party clip means rewriting the IoStore container (slot numbers ar
 `python slots.py fixids` lists container-id clashes that stop an anim pak from mounting and the new unique id it would get; `--apply` writes it (game closed), `python slots.py revert` restores the last backup (`slot_backups/ids-*/manifest.json` keeps the old ids and byte offsets). Only anim paks are patched, never the other mod of a clash. Patches the id in all three places it lives (utoc header +56, the ContainerHeader chunk id in the TOC, first 8 bytes of that chunk in the .ucas); refuses when the three disagree or the chunk is compressed. Note: Vortex hard-links mod files (ESAP has 2 links), so the staged copy changes too; a Vortex re-deploy keeps the patch, a re-download of the mod restores the clash.
 
 ## Exe (built 2026-11-25)
-`dist/SlotOrganizer.exe` (PyInstaller one-file, 5.5 MB, not committed): double-click = find the game, report clashes, show what `fixids` would change, wait for Enter. For changes use a terminal: `SlotOrganizer.exe fixids --apply` (game closed), `SlotOrganizer.exe revert`. Rebuild: `python -m PyInstaller --onefile --name SlotOrganizer --distpath dist --workpath build --specpath build slots.py` (`pip install pyinstaller` first). Some antivirus tools flag unsigned one-file exes.
+`dist/SlotOrganizer.exe` (PyInstaller one-file, ~5.6 MB, not committed; build it with `release.ps1`): double-click = `auto` (find the game, list container-id and slot clashes, ask, apply, wait). Terminal: `SlotOrganizer.exe scan|moveslots|fixids|auto|revert`, `--yes` skips the question. Some antivirus tools flag unsigned one-file exes.
 Slot ceiling is automatic: 1000, or the `limit=` of the AToolSlotLimit mod when it is installed and enabled (`--ceiling N` overrides). `reserved.txt` (one slot or range per line, `#` comments; default 901-907) keeps slots out of `plan`.
 
 ## Use
@@ -30,15 +30,13 @@ After `fixids --apply` (ESAP 0xcda35a93... -> 0x57925699..., OldDroid 0xfb3161d2
 Lesson: a probe that called `StaticFindObject` on a non-resident path crashed the game at 09:43:39 (a known trigger, see sb-live/docs/live-pak.md). Probe only with `FindAllOf` + name match; never `StaticFindObject`/`LoadAsset` on paths that may not be loaded.
 
 
-## Moving slots (moveslots)
+## Moving slots (`moveslots`)
 
-python slots.py moveslots plans a move for every slot held by two or more anim paks (the newest pak moves; LogicMods paks never do), --apply rewrites the pak's IoStore container to the new slot (game closed, same digit count only). Originals stay beside the pak as *.orig, *.orig1, ... and python slots.py revert puts them back; every step is journaled before it happens and a failure rolls back.
+`python slots.py moveslots` plans a move for every slot held by two or more anim paks (the newest pak moves; LogicMods paks never do), `--apply` rewrites the pak's IoStore container to the new slot (game closed, same digit count only). Originals stay beside the pak as `*.orig`, `*.orig1`, ... and `python slots.py revert` puts them back; every step is journaled before it happens and a failure rolls back.
 
-**Slot-keyed files** (udio/<slot>.wav, PEFA 
-ames.txt, PELA json) follow their owner. Owner comes from Vortex's deployment manifests when present; manual / mod-manager installs have none, so the tool keeps a first-sight ledger (slot_owners.json, filled on every run while a slot has a single pak). Known owner = renamed; other mod's = left; unknown on a shared slot = wav and PEFA name are copied, PELA left. A manually installed mod that overwrites another mod's wav before the first run cannot be told apart: run the tool once on a clean install, then after each install.
+**Slot-keyed files** (`audio/<slot>.wav`, PEFA `names.txt`, PELA json) follow their owner. Owner comes from Vortex's deployment manifests when present; manual / mod-manager installs have none, so the tool keeps a first-sight ledger (`slot_owners.json`, filled on every run while a slot has a single pak). Known owner = renamed; other mod's = left; unknown on a shared slot = wav and PEFA name are copied, PELA left. A manually installed mod that overwrites another mod's wav before the first run cannot be told apart: run the tool once on a clean install, then after each install.
 
-Not supported (reported, not guessed): moved packages with bulk chunks, digit-count changes, compressed containers.
-
+Not supported (reported, not guessed): digit-count changes, compressed containers, legacy `.pak`-only mods.
 ## Release
 
-.\release.ps1 runs the tests, builds the exe and writes elease\SlotOrganizer-<version>.zip (exe, README-USER.txt, optional AToolSlotLimit with install-atool-limit.ps1). Double-clicking the exe runs uto: scan, show what would change, ask, apply. --yes skips the question; --version prints the version.
+`.\release.ps1` runs the tests, builds the exe, smoke-tests it and writes `release\SlotOrganizer-<version>.zip` (exe, README-USER.txt, Undo-last-run.bat, optional AToolSlotLimit with install-atool-limit.bat/.ps1). It fails closed.

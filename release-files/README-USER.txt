@@ -26,7 +26,7 @@ WHAT CHANGES ON DISK (and how it is undone)
   * audio / PEFA names / PELA files: edited or copied; the originals are saved in the journal.
   * journals, the ledger and the cache live in  %LOCALAPPDATA%\SlotOrganizer  (they survive
     re-extracting a new release). The exact paths are printed when you apply.
-UNDO:  SlotOrganizer.exe revert   (game closed). It undoes the newest run - everything one
+UNDO:  double-click Undo-last-run.bat (or run SlotOrganizer.exe revert) with the game closed. It undoes the newest run - everything one
 double-click did, container ids and slot moves together. A file you changed after the run
 (a re-installed mod, an edited names.txt) is NOT overwritten: it is listed, the tool exits
 with an error, and the original is still beside it as *.orig. Vortex may show the *.orig
@@ -63,6 +63,7 @@ If no free slot is left, or a pak cannot be rewritten safely, the clash is repor
 
 SAFETY NOTES
   * Close the game first; the tool refuses to write while it runs, and checks again after you answer.
-  * If a previous run was interrupted (crash, power loss) the tool warns and refuses to change
-    anything until you run revert.
+  * If a previous run was interrupted (crash, power loss) the tool says so and offers to undo it
+    (or use Undo-last-run.bat); it changes nothing until that is done.
   * Windows SmartScreen / antivirus may warn about unsigned one-file exes.
+

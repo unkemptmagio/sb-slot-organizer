@@ -86,7 +86,7 @@ def find_game(arg=None):
     for r in roots:
         v = pathlib.Path(r) / "steamapps" / "libraryfolders.vdf"
         libs.append(r)
-        if v.exists(): libs += [m.replace("\\\\", "\\") for m in re.findall(r'"path"\s+"([^"]+)"', v.read_text(errors="replace"))]
+        if v.exists(): libs += [m.replace("\\\\", "\\") for m in re.findall(r'"path"\s+"([^"]+)"', v.read_text(encoding="utf-8", errors="replace"))]
     for l in libs:
         g = pathlib.Path(l) / "steamapps" / "common" / "StellarBlade" / "SB"
         if (g / "Content" / "Paks").is_dir(): return g
@@ -103,7 +103,7 @@ def scan(root, cache_file=None):
     inv, new, hits = {}, {}, 0
     for p in sorted(pathlib.Path(root).rglob("*")):
         e = p.suffix.lower()
-        if p.stem.endswith(".new") or e not in (".utoc", ".pak") or not p.is_file() or (e == ".pak" and p.with_suffix(".utoc").exists()): continue
+        if e not in (".utoc", ".pak") or not p.is_file() or (e == ".pak" and p.with_suffix(".utoc").exists()): continue
         st = p.stat(); key = str(p.relative_to(root)).replace("\\", "/"); sig = [st.st_size, int(st.st_mtime)]
         c = cache.get(key)
         if isinstance(c, dict) and c.get("sig") == sig and isinstance(c.get("slots"), list): slots = c["slots"]; hits += 1
@@ -120,7 +120,6 @@ def container_ids(root):
     """{utoc path rel to root: IoStore container id}: u64 at offset 56 of the TOC header. Two containers with the same id: only one mounts."""
     out = {}
     for p in sorted(pathlib.Path(root).rglob("*.utoc")):
-        if p.stem.endswith(".new"): continue
         with open(p, "rb") as f: h = f.read(64)
         if len(h) == 64 and h[:16] == b"-==--==--==--==-": out[str(p.relative_to(root)).replace("\\", "/")] = struct.unpack_from("<Q", h, 56)[0]
     return out
@@ -179,6 +178,10 @@ def plan(inv, ceiling=1000, pinned=lambda k: k.lower().startswith("logicmods/"),
 def id_sites(utoc):
     """where one container id lives: utoc header (+56), the ContainerHeader chunk id in the TOC, and the first 8 bytes of that chunk in the .ucas.
     Returns None unless all three agree and the chunk is stored uncompressed (compression block method 0)."""
+    try: return _id_sites(utoc)
+    except (OSError, struct.error, IndexError, ZeroDivisionError): return None            # orphan or truncated pak: reported as skipped, never a crash
+
+def _id_sites(utoc):
     b = pathlib.Path(utoc).read_bytes()
     if b[:16] != b"-==--==--==--==-": return None
     ec, cbc = struct.unpack_from("<2I", b, 24); bs = struct.unpack_from("<I", b, 44)[0]
@@ -216,34 +219,44 @@ def plan_fix(root, inv):
     return out
 
 def apply_fix(root, fixes, backup):
-    """patch the three sites; keep the old bytes in backup/manifest.json. Returns (done, skipped[(pak, why)]). Rolls back on any error."""
-    import json
+    """patch the three sites; journal in backup/manifest.json (done flag). Returns (done, skipped[(pak, why)]). Rolls back on any error or interrupt.
+    The files' modified times are put back so a later revert of an earlier slot move still recognises them."""
     root = pathlib.Path(root); backup = pathlib.Path(backup)
     man, skipped = [], []
     for k, old, new in fixes:
         sites = id_sites(root / k)
-        if not sites or sites["id"] != old: skipped.append((k, "id sites differ or chunk is compressed")); continue
+        if not sites or sites["id"] != old: skipped.append((k, "id sites differ, files unreadable or chunk is compressed")); continue
         if not (_lock_ok(sites["utoc"]) and _lock_ok(sites["ucas"])): skipped.append((k, "locked (game running?)")); continue
-        man.append({"pak": k, "old": old, "new": new, **{x: sites[x] for x in ("utoc", "ucas", "toc_chunk_off", "ucas_off")}})
+        man.append({"pak": k, "old": old, "new": new, "mt_utoc": os.stat(sites["utoc"]).st_mtime_ns, "mt_ucas": os.stat(sites["ucas"]).st_mtime_ns, **{x: sites[x] for x in ("utoc", "ucas", "toc_chunk_off", "ucas_off")}})
     if not man: return man, skipped                          # nothing patched: no journal, no empty "newest run"
-    backup.mkdir(parents=True, exist_ok=True); _save_manifest(backup / "manifest.json", man)
+    backup.mkdir(parents=True, exist_ok=True); j = {"kind": "ids", "items": man, "done": False}; _save_manifest(backup / "manifest.json", j)
     try:
         for m in man:
             with open(m["utoc"], "r+b") as f:
                 f.seek(56); f.write(struct.pack("<Q", m["new"])); f.seek(m["toc_chunk_off"]); f.write(struct.pack("<Q", m["new"]))
             with open(m["ucas"], "r+b") as f: f.seek(m["ucas_off"]); f.write(struct.pack("<Q", m["new"]))
+            _keep_mtime(m)
             s2 = id_sites(m["utoc"])
             if not s2 or s2["id"] != m["new"]: raise OSError("verify failed for %s" % m["pak"])
+        j["done"] = True; _save_manifest(backup / "manifest.json", j)
     except (OSError, struct.error) as e:
         revert_fix(backup); raise SystemExit("container id patch failed (%s); everything written so far was rolled back" % e)
+    except BaseException:
+        revert_fix(backup); raise
     return man, skipped
+
+def _keep_mtime(m):
+    for k, mt in (("utoc", m.get("mt_utoc")), ("ucas", m.get("mt_ucas"))):
+        if mt is not None and os.path.exists(m[k]):
+            try: os.utime(m[k], ns=(os.stat(m[k]).st_atime_ns, mt))
+            except OSError: pass
 
 def revert_fix(backup):
     """put the old id back at each of the three sites that still holds our new id (works on half-patched containers); idempotent"""
     import json
     mp = pathlib.Path(backup) / "manifest.json"
     if not mp.exists(): return 0
-    man = json.loads(mp.read_text()); n = 0
+    j = json.loads(mp.read_text()); man = j["items"] if isinstance(j, dict) else j; n = 0     # older journals are a bare list
     for m in man:
         hit = False
         for path, off in ((m["utoc"], 56), (m["utoc"], m["toc_chunk_off"]), (m["ucas"], m["ucas_off"])):
@@ -251,6 +264,7 @@ def revert_fix(backup):
             with open(path, "r+b") as f:
                 f.seek(off)
                 if struct.unpack("<Q", f.read(8))[0] == m["new"]: f.seek(off); f.write(struct.pack("<Q", m["old"])); hit = True
+        if hit: _keep_mtime(m)
         n += hit
     os.replace(mp, pathlib.Path(backup) / "manifest.reverted.json")
     return n
@@ -524,7 +538,7 @@ def interrupted(backup):
     """move journals that were started but never finished (crash, power loss, closed window)"""
     import glob, json
     out = []
-    for d in glob.glob(glob.escape(backup) + "/move-*"):
+    for d in glob.glob(glob.escape(backup) + "/move-*") + glob.glob(glob.escape(backup) + "/ids-*"):
         try:
             if json.loads(open(d + "/manifest.json", encoding="utf-8").read()).get("done") is False: out.append(d)       # journals from before this flag existed are not flagged
         except (OSError, ValueError): pass
@@ -533,7 +547,7 @@ def interrupted(backup):
 def sweep_temp(paks):
     """remove temp containers a killed run may have left in Paks (they would be mounted by the game); returns the removed names"""
     out = []
-    for pat in ("*.utoc.new", "*.ucas.new", "*.new.utoc", "*.new.ucas"):
+    for pat in ("*.utoc.new", "*.ucas.new"):                 # the only names this tool writes; a mod called X.new.utoc is a user file
         for f in pathlib.Path(paks).rglob(pat):
             try: f.unlink(); out.append(f.name)
             except OSError: pass
@@ -577,6 +591,11 @@ def main(argv):
     if a.cmd == "auto":                                    # what a double-click does: fix container ids, then slot clashes, asking first; one run stamp so `revert` undoes both
         import time as _t
         run = _t.strftime("%Y%m%d-%H%M%S")
+        iv0 = interrupted(a.backup)
+        if iv0:
+            print("An interrupted run was found: %s" % ", ".join(os.path.basename(d) for d in iv0))
+            if not _game_running() and _ask("Undo it now?"): return main(["revert", "--backup", a.backup])
+            print("Nothing was changed. Run Undo-last-run.bat (or SlotOrganizer.exe revert) first."); return 2
         base = ["--game", str(g), "--backup", a.backup, "--cache", a.cache, "--reserved", a.reserved, "--apply", "--run", run] + (["--yes"] if a.yes else []) + (["--ceiling", str(a.ceiling)] if a.ceiling else []) + (["--no-cache"] if a.no_cache else [])
         r1 = main(["fixids"] + base)
         if r1 >= 2: return r1
@@ -595,7 +614,7 @@ def main(argv):
     hit = {v: ks for v, ks in idc.items() if any(k in anim for k in ks)}
     if hit: print("%d container-id clash(es) involve anim paks (only one pak per id mounts, the other one's clips are unavailable)" % len(hit))
     iv = interrupted(a.backup)
-    if iv: print("WARNING: an interrupted run was found (%s). Run SlotOrganizer.exe revert before changing anything." % ", ".join(os.path.basename(d) for d in iv))
+    if iv: print("WARNING: an interrupted run was found (%s). Run Undo-last-run.bat (or SlotOrganizer.exe revert) before changing anything." % ", ".join(os.path.basename(d) for d in iv))
     for v, ks in hit.items(): print("  id %#x: %s" % (v, " | ".join(ks)))
     cl = {**cl, **{("id", v): ks for v, ks in hit.items()}}
     if a.cmd == "fixids":
@@ -658,6 +677,9 @@ def main(argv):
     return 1 if cl else 0
 
 def _cli():
+    for st in (sys.stdout, sys.stderr):
+        try: st.reconfigure(errors="replace")                 # odd characters in paths must never crash printing
+        except (AttributeError, ValueError, OSError): pass
     dbl = len(sys.argv) == 1                         # double-clicked exe: find clashes, show them, ask, fix, wait
     try: rc = main(sys.argv[1:] or ["auto"])
     except SystemExit as e:
