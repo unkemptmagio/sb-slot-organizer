@@ -19,3 +19,10 @@
 ## Slot-keyed files by owner
 - moveslots reads Vortex deployment manifests to learn which mod owns each wav / PELA file. Same source mod as the moved pak: renamed/rewritten even if the slot is shared. Another mod: left alone. Unknown owner on a shared slot: wav and PEFA name are copied to the new slot (PELA left alone). Unshared slot: renamed as before.
 - journal gained a copy step (reverted by deleting the copy); backup slots for saved files are unique per journal.
+
+## Review fixes
+- Journal written before each step, atomic manifest, rollback on any failure, revert is idempotent and tolerant of steps that never happened; revert picks the newest run and undoes its moves in numeric order; reverted manifests are renamed.
+- revert_fix works per site (half-patched containers); apply_fix checks locks and rolls back.
+- Temp *.new.* pairs are cleaned up and ignored by scan; free-space check; --pak/--to validated (must be a scanned pak, free slot within ceiling); LogicMods check is case-insensitive; explicit --game never falls back; backups/cache default next to the tool; game folder printed before applying.
+- Moves refuse digit-count changes and packages with bulk chunks tied to a moved package.
+- First-sight ownership ledger for installs without Vortex.

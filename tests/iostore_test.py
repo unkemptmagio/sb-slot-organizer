@@ -91,4 +91,29 @@ S.external_files(g, 801, 812, st, tmp / "fb2", shared=True, mover=None, srcs={})
 assert (au / "801.wav").exists() and (au / "812.wav").exists()
 j = {"steps": st}; (tmp / "fb").mkdir(exist_ok=True); (tmp / "fb" / "manifest.json").write_text(json.dumps(j)); S.revert_move(tmp / "fb")
 assert not (au / "812.wav").exists() and snap() == b0                                 # everything back
+# no Vortex: first-sight ledger decides ownership
+(au / "820.wav").write_bytes(b"C")
+led = S.ledger_update(g, {"~mods/a.utoc": [820], "~mods/b.utoc": [821]}, tmp / "owners.json")
+assert led[nc(str(au / "820.wav"))] == "pak:~mods/a.utoc"
+assert S.owner(au / "820.wav", "pak:~mods/b.utoc", led, True) == "theirs" and S.owner(au / "820.wav", "pak:~mods/a.utoc", led, True) == "mine"
+assert S.owner(au / "820.wav", "Vortex Mod", led, True) == "unknown"                # ledger vs Vortex names are not comparable
+assert S.ledger_update(g, {"~mods/a.utoc": [820], "~mods/b.utoc": [820]}, tmp / "owners.json")[nc(str(au / "820.wav"))] == "pak:~mods/a.utoc"   # a later clash does not steal it
+
+# failure injection: external_files blows up after the swap -> everything rolled back, no temp files, journal says reverted
+paks2 = tmp / "Paks2"; (paks2 / "~mods").mkdir(parents=True); make_pak(paks2 / "~mods", "p", 500, cid=9)
+h0 = {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in (paks2 / "~mods").iterdir()}
+real_ext = S.external_files
+def boom(*a, **k): raise OSError("names.txt locked")
+S.external_files = boom
+try: S.apply_move(paks2, g, "~mods/p.utoc", 500, 501, tmp / "fi", shared=False); assert 0
+except OSError: pass
+finally: S.external_files = real_ext
+assert {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in (paks2 / "~mods").iterdir()} == h0 and (tmp / "fi" / "manifest.reverted.json").exists()
+assert S.revert_move(tmp / "fi") == 0                                                # idempotent
+# a crash between the swap and the end: manifest on disk already lists the swaps, revert restores
+S.apply_move(paks2, g, "~mods/p.utoc", 500, 501, tmp / "ok1", shared=False)
+assert S.revert_move(tmp / "ok1") >= 2 and {q.name: hashlib.sha256(q.read_bytes()).hexdigest() for q in (paks2 / "~mods").iterdir()} == h0
+assert not any(".new" in q.name for q in (paks2 / "~mods").iterdir())
+# digit-count change is refused for moves
+assert S.try_rename(paks2, "~mods/p.utoc", 500, 1001)[0] is None
 print("ok")

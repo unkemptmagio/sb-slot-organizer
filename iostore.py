@@ -134,9 +134,8 @@ def read_container(utoc):
         cid, idx, pad, typ = struct.unpack_from("<QHBB", b, o_ids + 12 * i)
         off = int.from_bytes(b[o_off + 10 * i:o_off + 10 * i + 5], "big"); ln = int.from_bytes(b[o_off + 10 * i + 5:o_off + 10 * i + 10], "big")
         if off % bs: raise Unsupported("unaligned chunk offset")
-        data = b""; first = off // bs; n = -(-ln // bs)
-        for k in range(n):
-            po, us = blocks[first + k]; data += u[po:po + us]
+        first = off // bs; n = -(-ln // bs)
+        data = b"".join(u[blocks[first + k][0]:blocks[first + k][0] + blocks[first + k][1]] for k in range(n))
         if len(data) != ln: raise Unsupported("chunk length mismatch")
         meta = b[o_meta + 33 * i:o_meta + 33 * i + 33]
         c.chunks.append(dict(id=cid, index=idx, pad=pad, type=typ, data=data, meta_flags=meta[32], meta_pad=meta[20:32], meta_hash=meta[:20],
@@ -313,6 +312,7 @@ def rename_slot(c, old, new):
     if not moved: raise Unsupported("slot %s is not in this container" % old)
     if any(p is None for p in pk.values()): raise Unsupported("a package of the container cannot be parsed")
     movedids = {c.chunks[j]["id"] for j in moved}; idmap = {}; renames = []
+    if any(ch["type"] not in (2, 10) and ch["id"] in movedids for ch in c.chunks): raise Unsupported("a moved package has bulk chunks (their ids embed the package id; not rewritten)")
     for i in moved:
         nm = pn[i]; m = rx.match(nm)
         nn = ANIM + str(new) + m.group(2) + (m.group(3) or ""); nid = package_id(nn)

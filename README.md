@@ -29,3 +29,13 @@ Exit code 1 when clashes exist. Cache: `slot_cache.json` (pak path, size, mtime 
 ## fixids verified in game (2026-11-25 09:44)
 After `fixids --apply` (ESAP 0xcda35a93... -> 0x57925699..., OldDroid 0xfb3161d2... -> 0x37782ade...): ATOOL's `anim3` grew from 338 to 353 clips and ESAP's slots 700, 705 and 709 are now in it (before: absent), so the clash was the cause. OldDroid (307-311) lives under `Monster/CH_M_NA_49/Animation/DO_*` and is not loaded through `anim/<n>`; a name sweep finds none resident, so it is NOT confirmed (play an OldDroid scene to check).
 Lesson: a probe that called `StaticFindObject` on a non-resident path crashed the game at 09:43:39 (a known trigger, see sb-live/docs/live-pak.md). Probe only with `FindAllOf` + name match; never `StaticFindObject`/`LoadAsset` on paths that may not be loaded.
+
+
+## Moving slots (moveslots)
+
+python slots.py moveslots plans a move for every slot held by two or more anim paks (the newest pak moves; LogicMods paks never do), --apply rewrites the pak's IoStore container to the new slot (game closed, same digit count only). Originals stay beside the pak as *.orig, *.orig1, ... and python slots.py revert puts them back; every step is journaled before it happens and a failure rolls back.
+
+**Slot-keyed files** (udio/<slot>.wav, PEFA 
+ames.txt, PELA json) follow their owner. Owner comes from Vortex's deployment manifests when present; manual / mod-manager installs have none, so the tool keeps a first-sight ledger (slot_owners.json, filled on every run while a slot has a single pak). Known owner = renamed; other mod's = left; unknown on a shared slot = wav and PEFA name are copied, PELA left. A manually installed mod that overwrites another mod's wav before the first run cannot be told apart: run the tool once on a clean install, then after each install.
+
+Not supported (reported, not guessed): moved packages with bulk chunks, digit-count changes, compressed containers.
