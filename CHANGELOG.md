@@ -72,3 +72,6 @@
 
 ## 1.0.0 - Chrisr0 build in the package
 - The package carries two AToolSlotLimit builds (builds/revog-1.3, builds/chrisr0-3.1.0); install-atool-limit picks one by the UE4SS.dll hash (Chrisr0 line: asks first, untested). slots.py knows the three Chrisr0 hashes as UNTESTED_UE4SS: it names them and keeps the ceiling at 1000 until an in-game test moves them to KNOWN_UE4SS. release.ps1 packages both DLLs and checks the zip.
+
+## tools/make_test_clip.py
+- Makes a test copy of an anim pak at another slot (digit count may change) with a fresh container id; source only read. Used by the Chrisr0 in-game test plan.
