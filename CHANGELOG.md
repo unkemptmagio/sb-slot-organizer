@@ -56,3 +56,6 @@
 - An interrupted run can be undone from the double-click window (offered by auto) or with Undo-last-run.bat.
 - .m.ubulk is parsed correctly (longest extension first); printing paths with odd characters cannot crash; Steam library paths are read as UTF-8.
 - install-atool-limit uses -LiteralPath; release.ps1 now throws on any failed step, smoke-tests the built exe, removes stale zips and verifies the zip contents.
+## 1.0.0 - support log and license
+- Every run writes a support log (%LOCALAPPDATA%\SlotOrganizer\logs\slotorganizer.log, rotated at 512 KB); failures print its path; `SlotOrganizer.exe log` shows it.
+- MIT LICENSE, NOTICE.txt (CityHash MIT notice, bundled runtime, not-affiliated statement), credits in README-USER; zip ships LICENSE and NOTICE.txt.

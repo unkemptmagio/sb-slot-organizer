@@ -1,0 +1,44 @@
+SlotOrganizer - third-party notices and disclaimers
+====================================================
+
+SlotOrganizer is licensed under the MIT License (see LICENSE).
+
+NOT AFFILIATED
+SlotOrganizer is an independent, unofficial community tool. It is not made by, endorsed by or
+affiliated with Shift Up, Sony, Stellar Blade, UE4SS, or the authors of ATOOL, PEFA, PELA or any
+animation mod it works with. Those names belong to their owners. The tool never copies or
+redistributes anyone's mod: it only edits files already installed on your own computer, keeps
+the originals (see README-USER.txt) and can undo every change.
+
+CITYHASH (algorithm re-implemented in iostore.py)
+The package-id / name hash is a Python re-implementation of Google's CityHash64 (v1.1), the
+hash Unreal Engine uses. CityHash is distributed under the MIT License:
+
+  Copyright (c) 2011 Google, Inc.
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  THE SOFTWARE.
+
+BUNDLED RUNTIME (SlotOrganizer.exe only)
+The exe is built with PyInstaller and contains the Python runtime (Python Software Foundation
+License). PyInstaller is GPL-2.0-or-later with an exception that allows the bundled program to
+be distributed under any license.
+
+OPTIONAL: AToolSlotLimit
+The AToolSlotLimit folder is a separate UE4SS mod (same MIT license). It is built against the
+UE4SS C++ API (MIT, https://github.com/UE4SS-RE/RE-UE4SS) and is optional.

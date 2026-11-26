@@ -1,4 +1,4 @@
-﻿SlotOrganizer - Stellar Blade anim slot organizer
+SlotOrganizer - Stellar Blade anim slot organizer
 =================================================
 
 WHAT IT DOES
@@ -67,3 +67,15 @@ SAFETY NOTES
     (or use Undo-last-run.bat); it changes nothing until that is done.
   * Windows SmartScreen / antivirus may warn about unsigned one-file exes.
 
+IF SOMETHING GOES WRONG
+Every run writes a plain-text log: %LOCALAPPDATA%\SlotOrganizer\logs\slotorganizer.log
+(previous one: slotorganizer.log.1). The tool prints its path when a run fails. To see the path
+and the last lines:  SlotOrganizer.exe log
+When you ask for help, attach that file. It contains the paths of your game and mod folders and
+what the tool printed - read it first if that matters to you - and no passwords or personal data.
+First try Undo-last-run.bat, then ask.
+
+CREDITS AND LICENSE
+SlotOrganizer is free software (MIT License, see LICENSE) and an independent community tool: it is
+not affiliated with Shift Up, ATOOL, PEFA, PELA, UE4SS or any mod author. It works with their
+formats and never copies or redistributes their files. Third-party notices: NOTICE.txt.

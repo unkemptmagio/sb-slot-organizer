@@ -40,3 +40,9 @@ Not supported (reported, not guessed): digit-count changes, compressed container
 ## Release
 
 `.\release.ps1` runs the tests, builds the exe, smoke-tests it and writes `release\SlotOrganizer-<version>.zip` (exe, README-USER.txt, Undo-last-run.bat, optional AToolSlotLimit with install-atool-limit.bat/.ps1). It fails closed.
+
+## Support log
+Every run of the exe appends to `%LOCALAPPDATA%\SlotOrganizer\logs\slotorganizer.log` (rotated at 512 KB; from source: `logs/` in the repo, git-ignored). `SlotOrganizer.exe log` prints the path and the last lines; failures print the path.
+
+## License
+MIT (`LICENSE`). Third-party notices (Google CityHash, bundled Python/PyInstaller, UE4SS) and the "not affiliated" statement are in `release-files/NOTICE.txt`, which ships in the zip with `LICENSE`.

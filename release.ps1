@@ -1,4 +1,4 @@
-﻿# Builds dist\SlotOrganizer.exe and release\SlotOrganizer-<version>.zip. Fails closed: any problem throws, no stale zip is left behind.
+# Builds dist\SlotOrganizer.exe and release\SlotOrganizer-<version>.zip. Fails closed: any problem throws, no stale zip is left behind.
 param([string]$Game = $(if ($env:SB_GAME) { $env:SB_GAME } else { "E:\SteamLibrary\steamapps\common\StellarBlade\SB" }))
 function Run($what, [scriptblock]$cmd) { & $cmd; if ($LASTEXITCODE) { throw "$what failed (exit $LASTEXITCODE)" } }
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw "python not found on PATH" }
@@ -15,7 +15,7 @@ try { & .\dist\SlotOrganizer.exe scan --game $Game | Out-Null; if ($LASTEXITCODE
 $stage = "release\SlotOrganizer-$ver"; $zip = "release\SlotOrganizer-$ver.zip"
 Remove-Item -Recurse -Force $stage, $zip -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force "$stage\AToolSlotLimit\dlls" | Out-Null
-foreach ($f in "dist\SlotOrganizer.exe", "release-files\README-USER.txt", "release-files\install-atool-limit.ps1", "release-files\install-atool-limit.bat", "release-files\Undo-last-run.bat") { Copy-Item -LiteralPath $f -Destination $stage -ErrorAction Stop }
+foreach ($f in "dist\SlotOrganizer.exe", "release-files\README-USER.txt", "release-files\install-atool-limit.ps1", "release-files\install-atool-limit.bat", "release-files\Undo-last-run.bat", "release-files\LICENSE", "release-files\NOTICE.txt") { Copy-Item -LiteralPath $f -Destination $stage -ErrorAction Stop }
 Copy-Item -LiteralPath $dll -Destination "$stage\AToolSlotLimit\dlls" -ErrorAction Stop
 Set-Content "$stage\AToolSlotLimit\enabled.txt" "1" -Encoding ascii            # canonical defaults, not whatever the author's install holds
 Set-Content "$stage\AToolSlotLimit\config.txt" "limit=9999" -Encoding ascii
@@ -23,6 +23,6 @@ Compress-Archive -Force -Path "$stage\*" -DestinationPath $zip -ErrorAction Stop
 if (-not (Test-Path $zip)) { throw "zip was not created" }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $names = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip)).Entries | ForEach-Object { $_.FullName }
-foreach ($need in "SlotOrganizer.exe", "README-USER.txt", "Undo-last-run.bat", "install-atool-limit.bat") { if (-not ($names | Where-Object { $_ -eq $need })) { throw "zip is missing $need" } }
+foreach ($need in "SlotOrganizer.exe", "README-USER.txt", "Undo-last-run.bat", "install-atool-limit.bat", "LICENSE", "NOTICE.txt") { if (-not ($names | Where-Object { $_ -eq $need })) { throw "zip is missing $need" } }
 "main.dll sha256: " + (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
 Get-FileHash $zip -Algorithm SHA256 | Format-List

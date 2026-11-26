@@ -1,4 +1,4 @@
-﻿"""iostore + slot mover tests. Synthetic containers (no game files); real-pak vectors only when the local files exist."""
+"""iostore + slot mover tests. Synthetic containers (no game files); real-pak vectors only when the local files exist."""
 import sys, pathlib, tempfile, struct, hashlib, os, json
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import iostore as I, slots as S
@@ -183,4 +183,12 @@ t_before = (os.stat(pm2 / "one.utoc").st_mtime_ns, os.stat(pm2 / "one.ucas").st_
 S.apply_fix(pm2, [("one.utoc", 77, 0x1234567890ABCDEF)], tmp / "mt2")
 assert (os.stat(pm2 / "one.utoc").st_mtime_ns, os.stat(pm2 / "one.ucas").st_mtime_ns) == t_before
 S.revert_fix(tmp / "mt2"); assert S.revert_move(tmp / "mt1") >= 2 and not getattr(S.revert_move, "kept", 0)
+# support log: header, tee, rotation, unwritable location
+import io
+lp = tmp / "logs" / "so.log"; lf = S._open_log(str(lp), ["scan", "--game", "x"]); assert lf
+buf = io.StringIO(); tee = S._Tee(buf, lf); tee.write("hello log\n"); tee.flush(); lf.close()
+txt = lp.read_text(encoding="utf-8"); assert "SlotOrganizer " + S.VERSION in txt and "args=scan --game x" in txt and "hello log" in txt and buf.getvalue() == "hello log\n"
+lp.write_bytes(b"x" * 600000); lf2 = S._open_log(str(lp), []); lf2.close(); assert (tmp / "logs" / "so.log.1").exists() and lp.stat().st_size < 1000
+S._Tee(None, io.StringIO()).write("no console")                                         # stdout None (windowless) must not crash
+(tmp / "blockfile").write_text("a file, not a folder"); assert S._open_log(str(tmp / "blockfile" / "x.log")) is None          # unwritable location: no crash
 print("ok")

@@ -560,9 +560,15 @@ def _ask(q):
 def main(argv):
     import argparse, time
     ap = argparse.ArgumentParser(prog="slots", description="Stellar Blade anim slot organizer (scan, fixids, moveslots, auto, revert)")
-    ap.add_argument("cmd", choices=["scan", "plan", "fixids", "moveslots", "auto", "revert"]); ap.add_argument("--game"); ap.add_argument("--ceiling", type=int, default=None, help="default: auto (1000, or the AToolSlotLimit limit)"); ap.add_argument("--reserved", default=os.path.join(HERE, "reserved.txt")); ap.add_argument("--run", help=argparse.SUPPRESS)
+    ap.add_argument("cmd", choices=["scan", "plan", "fixids", "moveslots", "auto", "revert", "log"]); ap.add_argument("--game"); ap.add_argument("--ceiling", type=int, default=None, help="default: auto (1000, or the AToolSlotLimit limit)"); ap.add_argument("--reserved", default=os.path.join(HERE, "reserved.txt")); ap.add_argument("--run", help=argparse.SUPPRESS)
     ap.add_argument("--apply", action="store_true", help="fixids/moveslots: really write (default: dry run)"); ap.add_argument("--pak", help="moveslots: move this pak (path relative to Paks, e.g. ~mods/BBS_P.utoc)"); ap.add_argument("--slot", type=int, help="moveslots --pak: the slot to move"); ap.add_argument("--to", type=int, help="moveslots --pak: the target slot"); ap.add_argument("--backup", default=os.path.join(DATA, "slot_backups")); ap.add_argument("--cache", default=os.path.join(DATA, "slot_cache.json")); ap.add_argument("--no-cache", action="store_true"); ap.add_argument("--version", action="version", version="SlotOrganizer " + VERSION); ap.add_argument("--yes", action="store_true", help="apply without asking")
     a = ap.parse_args(argv)
+    if a.cmd == "log":                                     # where the support log is, and its last lines
+        print(LOG_PATH or _log_default())
+        try:
+            for l in open(LOG_PATH or _log_default(), encoding="utf-8", errors="replace").read().splitlines()[-40:]: print(l)
+        except OSError: print("(no log yet)")
+        return 0
     if a.cmd == "revert":                                  # journals hold absolute paths: no game folder needed
         import glob
         if _game_running(): print("Stellar Blade is running: close it first"); return 2
@@ -676,10 +682,41 @@ def main(argv):
         print("%d moves proposed (nothing is changed on disk yet)" % len(mv))
     return 1 if cl else 0
 
+LOG_PATH = None
+
+def _log_default(): return os.path.join(DATA, "logs", "slotorganizer.log")
+
+class _Tee:
+    """everything printed also goes to the log file (a missing console, e.g. pythonw, is fine)"""
+    def __init__(self, stream, f): self.s, self.f = stream, f
+    def write(self, x):
+        try: self.f.write(x)
+        except (OSError, ValueError): pass
+        return self.s.write(x) if self.s is not None else len(x)
+    def flush(self):
+        try: self.f.flush()
+        except (OSError, ValueError): pass
+        if self.s is not None: self.s.flush()
+    def __getattr__(self, n): return getattr(self.s, n)
+
+def _open_log(path, argv=None, keep=512 * 1024):
+    """append-mode support log with a small header (version, OS, args); rotates to .1 above `keep` bytes. None if it cannot be written."""
+    import platform, time
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        if os.path.exists(path) and os.path.getsize(path) > keep: os.replace(path, path + ".1")
+        f = open(path, "a", encoding="utf-8", errors="replace", buffering=1)
+        f.write("\n===== %s  SlotOrganizer %s  %s  %s  frozen=%s  args=%s =====\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), VERSION, platform.platform(), platform.python_version(), bool(getattr(sys, "frozen", False)), " ".join(argv or [])))
+        return f
+    except OSError: return None
+
 def _cli():
+    global LOG_PATH
     for st in (sys.stdout, sys.stderr):
         try: st.reconfigure(errors="replace")                 # odd characters in paths must never crash printing
         except (AttributeError, ValueError, OSError): pass
+    lf = _open_log(_log_default(), sys.argv[1:])
+    if lf: LOG_PATH = _log_default(); sys.stdout = _Tee(sys.stdout, lf); sys.stderr = _Tee(sys.stderr, lf)
     dbl = len(sys.argv) == 1                         # double-clicked exe: find clashes, show them, ask, fix, wait
     try: rc = main(sys.argv[1:] or ["auto"])
     except SystemExit as e:
@@ -688,6 +725,7 @@ def _cli():
     except KeyboardInterrupt: print("interrupted"); rc = 130
     except BaseException:
         import traceback; traceback.print_exc(); print("\nUnexpected error. Nothing is left half-done unless the line above says so; `SlotOrganizer.exe revert` undoes the last run."); rc = 1
+    if LOG_PATH and rc not in (0, 1): print("\nSomething did not go as planned. If you ask for help, attach this log file:\n  %s" % LOG_PATH)
     if dbl and getattr(sys, "frozen", False):
         try: input("\nPress Enter to close")
         except (EOFError, RuntimeError, OSError): pass
