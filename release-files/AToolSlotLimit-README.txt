@@ -3,7 +3,12 @@
 
 REQUIRES:  RevOG SB-UE4SS 1.3  -  and nothing else.
            UE4SS.dll SHA-256  E0CC51CE5B47D5BE82194510B0B4B4054DD15CE0322A983655A022F92D27DABE
-           ue4ss\UE4SS.log starts with:  UE4SS - v3.0.1 Beta #0 - Git SHA #08a0733
+           ue4ss\UE4SS.log has a line near the top (line 2, after a timestamp) reading:
+           UE4SS - v3.0.1 Beta #0 - Git SHA #08a0733
+           (the SHA-256 above is the reliable check)
+
+ALSO REQUIRES: ATOOL (HD-ATOOL_P) installed. The mod waits for ATOOL's class and has never been run without it.
+Settings: limit=1000 leaves ATOOL unchanged; values below 1000 are not supported.
 
 This is a native UE4SS mod (a DLL). It was built against, and tested only with, that exact UE4SS build.
 On any other UE4SS (including Chrisr0/RE-UE4SS 3.1.x, where a test ended in a crash while loading)

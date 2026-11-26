@@ -450,6 +450,7 @@ def external_files(game, old, new, apply_to=None, backup=None, shared=False, mov
     names = pefa / "names.txt"
     if names.is_file():
         txt = names.read_bytes().decode("utf-8", "surrogateescape"); m = re.search(r"(?m)^%d(\s*=.*)$" % old, txt)       # lossless: bytes and line endings survive
+        if m and re.search(r"(?m)^%d\s*=" % new, txt): out.append(("note: PEFA names.txt already names slot %d: the name of slot %d was left as it is" % (new, old), names))
         if m and not re.search(r"(?m)^%d\s*=" % new, txt):
             if shared:                                              # PEFA's names.txt has no owner: keep the old line, add one for the new slot
                 out.append(("PEFA names.txt: line %d copied to %d (slot shared)" % (old, new), names)); edit = lambda t: re.sub(r"(?m)^(%d)(\s*=.*)$" % old, lambda mm: mm.group(0) + "\n" + str(new) + mm.group(2), t, count=1)
@@ -462,7 +463,7 @@ def external_files(game, old, new, apply_to=None, backup=None, shared=False, mov
         p = pefa / nm
         if p.is_file():
             out.append(("PEFA cache %s deleted (PEFA rebuilds it)" % nm, p))
-            if backup: b = save(p); apply_to.append({"kind": "file", "path": str(p), "backup": str(b), "sig": None}); p.unlink()
+            if backup: b = save(p); apply_to.append({"kind": "file", "path": str(p), "backup": str(b), "sig": None, "deleted": True}); p.unlink()
     pela = game / "Content" / "Paks" / "~mods" / "PELA Patches"
     for p in sorted(pela.glob("*.json")) if pela.is_dir() else []:
         try: doc = json.loads(p.read_text(encoding="utf-8-sig"))
@@ -551,6 +552,8 @@ def revert_move(backup):
                 os.unlink(st["to"]); n += 1
         elif st["kind"] == "file":
             if not os.path.exists(st["backup"]): continue
+            if st.get("deleted"):                                       # a cache the tool removed: the game rebuilt it for the moved layout, the saved original matches the restored paks
+                shutil.copy2(st["backup"], st["path"]); n += 1; continue
             if st.get("sig") is None and os.path.exists(st["path"]): print("  not restored (recreated since the move): %s" % st["path"]); kept += 1; continue
             if changed(st, st["path"]): kept += 1; continue
             shutil.copy2(st["backup"], st["path"]); n += 1
@@ -603,7 +606,7 @@ def main(argv):
         import glob
         if _game_running(): print("Stellar Blade is running: close it first"); return 2
         ds = [d for d in glob.glob(glob.escape(a.backup) + "/ids-*") + glob.glob(glob.escape(a.backup) + "/move-*") if os.path.exists(d + "/manifest.json")]
-        if not ds: print("nothing to revert in", a.backup); return 2
+        if not ds: print("nothing to revert in", a.backup); return 0
         ts = lambda d: re.search(r"(\d{8}-\d{6})", os.path.basename(d)).group(1)
         last = max(ts(d) for d in ds); grp = [d for d in ds if ts(d) == last]       # the newest run: its moves newest first, then its id patches
         grp.sort(key=lambda d: (0, -int(d.rsplit("-", 1)[1])) if os.path.basename(d).startswith("move-") else (1, 0))
@@ -613,7 +616,7 @@ def main(argv):
                 if os.path.basename(d).startswith("move-"): print("undid %d step(s) of %s" % (revert_move(d), d)); kept += getattr(revert_move, "kept", 0)
                 else: print("restored %d container id(s) from %s" % (revert_fix(d), d))
             except OSError as e: print("could not revert %s: %s (is the game or Vortex using the files?)" % (d, e)); return 2
-        if kept: print("\n%d file(s) were NOT restored because they changed after the tool wrote them; the originals are still beside them as *.orig - check them by hand." % kept); return 3
+        if kept: print("\n%d file(s) were NOT restored because they changed after the tool wrote them; the originals are still there: paks as *.orig beside them, other files in the journal folder (files\\<n>) - check them by hand." % kept); return 3
         return 0
     g = find_game(a.game)
     if not g and not a.game and sys.stdin is not None and sys.stdin.isatty():

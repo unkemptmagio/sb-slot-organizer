@@ -2,6 +2,7 @@
 param([string]$Game = $(if ($env:SB_GAME) { $env:SB_GAME } else { "E:\SteamLibrary\steamapps\common\StellarBlade\SB" }))
 function Run($what, [scriptblock]$cmd) { & $cmd; if ($LASTEXITCODE) { throw "$what failed (exit $LASTEXITCODE)" } }
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) { throw "python not found on PATH" }
+if (git status --porcelain) { throw "uncommitted changes: commit first so the zip matches the repository" }
 Run "slots_test" { python tests\slots_test.py }
 Run "iostore_test" { python tests\iostore_test.py }
 Run "PyInstaller" { python -m PyInstaller --onefile --name SlotOrganizer --distpath dist --workpath build --specpath build slots.py 2>$null | Out-Null }
@@ -9,6 +10,9 @@ $ver = (python slots.py --version).Split(" ")[1]
 if ((& .\dist\SlotOrganizer.exe --version) -ne "SlotOrganizer $ver") { throw "built exe reports the wrong version" }
 $dll = Join-Path $Game "Binaries\Win64\ue4ss\Mods\AToolSlotLimit\dlls\main.dll"
 if (-not (Test-Path -LiteralPath $dll)) { throw "AToolSlotLimit main.dll not found at $dll (pass -Game <SB folder>)" }
+# the packaged DLL must be exactly the tested build (RevOG SB-UE4SS 1.3); rebuilding the mod means re-testing it and updating this pin
+$pinned = "F9FF1CFE1DF2F38C73D7E39A75FD77777B6DEBB3C93A913F81FAB657DA4AFAE7"
+if ((Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash -ne $pinned) { throw "main.dll at $dll is not the tested build ($pinned)" }
 # the packaged DLL must be the RevOG-line build (the only tested one): it imports CppUserModBase::on_cpp_mods_loaded
 $dumpbin = Get-ChildItem "C:\Program Files*\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -Last 1 -ExpandProperty FullName
 if (-not $dumpbin) { throw "dumpbin not found (Visual Studio C++ build tools)" }
@@ -24,10 +28,14 @@ Copy-Item -LiteralPath $dll -Destination "$stage\AToolSlotLimit\dlls\main.dll" -
 Copy-Item -LiteralPath "release-files\AToolSlotLimit-README.txt" -Destination "$stage\AToolSlotLimit\README.txt" -ErrorAction Stop
 Set-Content "$stage\AToolSlotLimit\enabled.txt" "1" -Encoding ascii            # canonical defaults, not whatever the author's install holds
 Set-Content "$stage\AToolSlotLimit\config.txt" "limit=9999" -Encoding ascii
-Compress-Archive -Force -Path "$stage\*" -DestinationPath $zip -ErrorAction Stop
-if (-not (Test-Path $zip)) { throw "zip was not created" }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$names = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip)).Entries | ForEach-Object { $_.FullName -replace '\\', '/' }
-foreach ($need in "SlotOrganizer.exe", "README-USER.txt", "Undo-last-run.bat", "install-atool-limit.bat", "LICENSE", "NOTICE.txt", "AToolSlotLimit/dlls/main.dll", "AToolSlotLimit/README.txt") { if (-not ($names | Where-Object { $_ -eq $need })) { throw "zip is missing $need" } }
+$stageFull = (Resolve-Path $stage).Path; $zipFull = Join-Path (Get-Location).Path $zip
+[IO.Compression.ZipFile]::CreateFromDirectory($stageFull, $zipFull, [IO.Compression.CompressionLevel]::Optimal, $true)   # one top-level folder, forward-slash entry names
+if (-not (Test-Path $zip)) { throw "zip was not created" }
+$zf = [IO.Compression.ZipFile]::OpenRead($zipFull); $names = $zf.Entries | ForEach-Object { $_.FullName }; $zf.Dispose()
+if ($names | Where-Object { $_ -match '\\' }) { throw "zip entry names contain backslashes" }
+$top = "SlotOrganizer-$ver/"
+if ($names | Where-Object { -not $_.StartsWith($top) }) { throw "zip has entries outside $top" }
+foreach ($need in "SlotOrganizer.exe", "README-USER.txt", "Undo-last-run.bat", "install-atool-limit.bat", "install-atool-limit.ps1", "LICENSE", "NOTICE.txt", "AToolSlotLimit/dlls/main.dll", "AToolSlotLimit/README.txt", "AToolSlotLimit/config.txt", "AToolSlotLimit/enabled.txt") { if (-not ($names | Where-Object { $_ -eq "$top$need" })) { throw "zip is missing $need" } }
 "AToolSlotLimit main.dll sha256 (RevOG SB-UE4SS 1.3 build): " + (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
 Get-FileHash $zip -Algorithm SHA256 | Format-List

@@ -1,3 +1,5 @@
+> **Historical note (2026-11-25).** This is the first spike, written before the limit was resolved: the limit was later found (three `EX_IntConst 1000` in ATOOL's ModActor `DataGet1-3`) and is lifted by the optional AToolSlotLimit mod. Paths below are the author's machine. Current status: `docs/next.md`.
+
 # Spike 0: where does the ATOOL slot limit live? (2026-11-25, partial)
 
 Verified:

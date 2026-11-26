@@ -5,7 +5,7 @@
 >
 > **The optional AToolSlotLimit mod (slots above 1000) works ONLY with `RevOG SB-UE4SS 1.3`:**
 > - `UE4SS.dll` SHA-256 `E0CC51CE5B47D5BE82194510B0B4B4054DD15CE0322A983655A022F92D27DABE`
-> - first line of `ue4ss\UE4SS.log`: `UE4SS - v3.0.1 Beta #0 - Git SHA #08a0733`
+> - a line near the top of `ue4ss\UE4SS.log` (line 2, after a timestamp): `UE4SS - v3.0.1 Beta #0 - Git SHA #08a0733`
 >
 > **Any other UE4SS build is unsupported and untested.** A test on Chrisr0/RE-UE4SS 3.1.0-5 ended in a game crash while loading. The installer refuses other builds. If you are not on RevOG SB-UE4SS 1.3, do not install the optional mod - SlotOrganizer itself works without it (it keeps everything within slots 1..1000).
 > Not tested on a real game folder: installs without Vortex (synthetic folders only), Epic / GOG copies.
@@ -17,7 +17,7 @@ Animation mods that use the ATOOL / PEFA / PELA system claim numbered slots. Whe
 | | Required |
 |---|---|
 | SlotOrganizer | Windows, Stellar Blade. No UE4SS needed. |
-| AToolSlotLimit (optional) | **RevOG SB-UE4SS 1.3** (see the box above) with BPModLoaderMod, ATOOL installed |
+| AToolSlotLimit (optional) | **RevOG SB-UE4SS 1.3** (see the box above) and **ATOOL (HD-ATOOL_P)** installed - the mod has never been run without ATOOL |
 
 ## Install / use / undo
 1. Close the game, double-click `SlotOrganizer.exe`, read the list, answer `y`.

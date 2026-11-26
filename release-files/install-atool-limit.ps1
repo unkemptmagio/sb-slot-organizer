@@ -5,8 +5,9 @@
 param([string]$Game, [switch]$InstallUnverified)
 $ErrorActionPreference = "Stop"
 try {
-    if (-not $Game) { $Game = Read-Host "Path to the StellarBlade folder (the one that contains SB)" }
+    if (-not $Game) { $Game = "" + (Read-Host "Path to the StellarBlade folder (the one that contains SB)") }
     $Game = $Game.Trim().Trim('"')
+    if (-not $Game) { throw "no game folder given (run with -Game <path to StellarBlade>)" }
     $root = if (Test-Path -LiteralPath (Join-Path $Game "SB\Binaries")) { Join-Path $Game "SB" } else { $Game }
     $win64 = Join-Path $root "Binaries\Win64"
     $mods = @((Join-Path $win64 "ue4ss\Mods"), (Join-Path $win64 "Mods")) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
@@ -29,10 +30,13 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $dest $f))) { Copy-Item -LiteralPath (Join-Path $src $f) -Destination (Join-Path $dest $f) }
     }
     if (-not (Test-Path -LiteralPath (Join-Path $dest "dlls\main.dll"))) { throw "copy failed" }
-    Write-Host "Installed to $dest (tested with RevOG SB-UE4SS 1.3 only)"
+    if ($have -eq $known) { Write-Host "Installed to $dest (your UE4SS is RevOG SB-UE4SS 1.3, the tested one)" }
+    else { Write-Host "Installed to $dest ON AN UNSUPPORTED UE4SS (-InstallUnverified): it may crash the game at launch - delete the folder if it does." }
+    if ((Test-Path -LiteralPath (Join-Path $dest "enabled.txt")) -and ((Get-Content -LiteralPath (Join-Path $dest "enabled.txt") -Raw).Trim() -eq "0")) { Write-Host "Note: enabled.txt is 0, so the mod stays OFF until you set it to 1." }
     Write-Host "Settings: config.txt (limit=9999), enabled.txt (1 = on, 0 = off). Delete the folder to uninstall."
     Write-Host "If the game crashes at launch after this, delete the folder."
 } catch {
-    Write-Host "Not installed: $($_.Exception.Message)  (close the game first if a file is locked)"
+    $hint = if ($_.Exception -is [System.IO.IOException] -or $_.Exception -is [System.UnauthorizedAccessException]) { "  (close the game first if a file is locked)" } else { "" }
+    Write-Host "Not installed: $($_.Exception.Message)$hint"
     exit 1
 }
