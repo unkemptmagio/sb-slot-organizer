@@ -129,11 +129,27 @@ def id_clashes(root):
     for k, v in container_ids(root).items(): by[v].append(k)
     return {v: ks for v, ks in by.items() if len(ks) > 1}
 
-def detect_ceiling(game):
-    """highest usable slot: 1000 (ATOOL's own loop bound), or the `limit=` of the AToolSlotLimit mod when it is installed and enabled"""
+# UE4SS builds AToolSlotLimit's DLL is verified to load with (symbol check + in-game, 2026-11-25). The DLL links to C++ symbols of the
+# host UE4SS; builds without them (Chrisr0/RE-UE4SS 3.1.0-5, SB-UE4SS 3.1.6) cannot load it.
+KNOWN_UE4SS = {"E0CC51CE5B47D5BE82194510B0B4B4054DD15CE0322A983655A022F92D27DABE": "RevOG SB-UE4SS 1.3"}
+
+def ue4ss_build(game, known=None):
+    """name of the installed UE4SS if it is one AToolSlotLimit is verified with, else None"""
+    import hashlib
+    w = pathlib.Path(game) / "Binaries" / "Win64"
+    for c in (w / "ue4ss" / "UE4SS.dll", w / "UE4SS.dll"):
+        if c.is_file():
+            try: return (KNOWN_UE4SS if known is None else known).get(hashlib.sha256(c.read_bytes()).hexdigest().upper())
+            except OSError: return None
+    return None
+
+def detect_ceiling(game, known=None):
+    """highest usable slot: 1000 (ATOOL's own loop bound), or the `limit=` of the AToolSlotLimit mod when it is installed, enabled AND the
+    installed UE4SS is a build it is verified with (otherwise the mod would not load and slots above 1000 would be invisible)"""
     d = pathlib.Path(game) / "Binaries" / "Win64" / "ue4ss" / "Mods" / "AToolSlotLimit"
     en = d / "enabled.txt"
     if not (d / "dlls" / "main.dll").is_file() or (en.is_file() and en.read_text(errors="replace").strip() == "0"): return 1000
+    if not ue4ss_build(game, known): return 1000
     lim = 9999
     try:
         for l in (d / "config.txt").read_text(errors="replace").splitlines():
@@ -609,7 +625,10 @@ def main(argv):
         if r2 >= 2: return r2
         if os.path.isdir(a.backup) and any(os.path.basename(d).endswith(run) or run in d for d in os.listdir(a.backup)): print("\nUndo this run with: SlotOrganizer.exe revert")
         return 0
-    if a.ceiling is None: a.ceiling = detect_ceiling(g)
+    if a.ceiling is None:
+        a.ceiling = detect_ceiling(g)
+        if a.ceiling == 1000 and (g / "Binaries" / "Win64" / "ue4ss" / "Mods" / "AToolSlotLimit" / "dlls" / "main.dll").is_file() and not ue4ss_build(g):
+            print("note: AToolSlotLimit is installed but your UE4SS build is not one it is verified with (RevOG SB-UE4SS 1.3), so slots stay within 1..1000.")
     t = time.time(); inv = scan(g / "Content" / "Paks", None if a.no_cache else a.cache)
     lp = os.path.join(os.path.dirname(os.path.abspath(a.cache)), "slot_owners.json"); first_run = not os.path.exists(lp)
     ledger = ledger_update(g, inv, lp)

@@ -13,7 +13,7 @@ Moving a third-party clip means rewriting the IoStore container (slot numbers ar
 
 ## Exe (built 2026-11-25)
 `dist/SlotOrganizer.exe` (PyInstaller one-file, ~5.6 MB, not committed; build it with `release.ps1`): double-click = `auto` (find the game, list container-id and slot clashes, ask, apply, wait). Terminal: `SlotOrganizer.exe scan|moveslots|fixids|auto|revert`, `--yes` skips the question. Some antivirus tools flag unsigned one-file exes.
-Slot ceiling is automatic: 1000, or the `limit=` of the AToolSlotLimit mod when it is installed and enabled (`--ceiling N` overrides). `reserved.txt` (one slot or range per line, `#` comments; default 901-907) keeps slots out of `plan`.
+Slot ceiling is automatic: 1000, or the `limit=` of the AToolSlotLimit mod when it is installed, enabled and the UE4SS build is verified (RevOG SB-UE4SS 1.3) (`--ceiling N` overrides). `reserved.txt` (one slot or range per line, `#` comments; default 901-907) keeps slots out of `plan`.
 
 ## Use
 ```

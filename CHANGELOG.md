@@ -59,3 +59,7 @@
 ## 1.0.0 - support log and license
 - Every run writes a support log (%LOCALAPPDATA%\SlotOrganizer\logs\slotorganizer.log, rotated at 512 KB); failures print its path; `SlotOrganizer.exe log` shows it.
 - MIT LICENSE, NOTICE.txt (CityHash MIT notice, bundled runtime, not-affiliated statement), credits in README-USER; zip ships LICENSE and NOTICE.txt.
+
+## 1.0.0 - UE4SS compatibility check
+- Symbol comparison of AToolSlotLimit's 20 UE4SS imports: RevOG SB-UE4SS 1.3 (the installed build, UE4SS.log 'v3.0.1 Beta, Git SHA 08a0733') resolves all; SB-UE4SS 3.1.6 and Chrisr0/RE-UE4SS 3.1.0-5 each miss 5 CppUserModBase exports (on_lua_start/on_lua_stop/on_cpp_mods_loaded), so the DLL cannot load there.
+- detect_ceiling only raises the ceiling above 1000 when the installed UE4SS.dll hash is a verified build; install-atool-limit.ps1 warns on unverified builds (-Force to skip).

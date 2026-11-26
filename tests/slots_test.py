@@ -32,13 +32,21 @@ done, skipped = S.apply_fix(d3, fx, d3 / "bk"); assert len(done) == 2 and not sk
 ids = S.container_ids(d3); assert ids["other.utoc"] == 5 and len({ids["a.utoc"], ids["b.utoc"], 5}) == 3 and not S.id_clashes(d3)
 assert S.revert_fix(d3 / "bk") == 2 and S.container_ids(d3) == {"a.utoc": 5, "b.utoc": 5, "other.utoc": 5}   # byte-exact round trip
 assert S.revert_fix(d3 / "bk") == 0                                                  # reverting twice changes nothing
-g = pathlib.Path(tempfile.mkdtemp()); assert S.detect_ceiling(g) == 1000                    # mod not installed
+import hashlib
+KN = {hashlib.sha256(b"fake ue4ss").hexdigest().upper(): "test build"}
+g = pathlib.Path(tempfile.mkdtemp()); assert S.detect_ceiling(g, KN) == 1000                    # mod not installed
 m = g / "Binaries" / "Win64" / "ue4ss" / "Mods" / "AToolSlotLimit"; (m / "dlls").mkdir(parents=True); (m / "dlls" / "main.dll").write_bytes(b"x")
-assert S.detect_ceiling(g) == 9999                                                    # installed, no config -> default
+U = g / "Binaries" / "Win64" / "ue4ss" / "UE4SS.dll"; U.write_bytes(b"fake ue4ss")
+assert S.detect_ceiling(g, KN) == 9999                                                   # installed, no config -> default
 NL = chr(10)
-(m / "config.txt").write_text("limit=5000" + NL); assert S.detect_ceiling(g) == 5000
-(m / "config.txt").write_text("limit=1000" + NL); assert S.detect_ceiling(g) == 1000
-(m / "enabled.txt").write_text("0"); (m / "config.txt").write_text("limit=5000" + NL); assert S.detect_ceiling(g) == 1000   # disabled
+(m / "config.txt").write_text("limit=5000" + NL); assert S.detect_ceiling(g, KN) == 5000
+(m / "config.txt").write_text("limit=1000" + NL); assert S.detect_ceiling(g, KN) == 1000
+(m / "enabled.txt").write_text("0"); (m / "config.txt").write_text("limit=5000" + NL); assert S.detect_ceiling(g, KN) == 1000   # disabled
+(m / "enabled.txt").write_text("1"); (m / "config.txt").write_text("limit=5000" + NL)
+U.unlink(); assert S.detect_ceiling(g, KN) == 1000                                    # mod installed, UE4SS missing -> not trusted
+U.write_bytes(b"other ue4ss"); assert S.detect_ceiling(g, KN) == 1000 and S.ue4ss_build(g, KN) is None     # unknown UE4SS build -> 1000
+U.write_bytes(b"fake ue4ss"); assert S.detect_ceiling(g, KN) == 5000 and S.ue4ss_build(g, KN) == "test build"
+
 rf = g / "r.txt"; rf.write_text(NL.join(["# c", "5", "10-12 # x", "bad"]) + NL); assert S.load_reserved(rf) == {5, 10, 11, 12}
 assert S.load_reserved(g / "none.txt") == set(range(901, 908))
 print("ok")

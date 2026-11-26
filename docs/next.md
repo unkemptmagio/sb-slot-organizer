@@ -1,4 +1,4 @@
-﻿# Status and next steps (2026-11-25)
+# Status and next steps (2026-11-25)
 
 ## Done and verified in game
 - ATOOL 1000 limit located (three IntConst 1000 in ModActor DataGet1-3) and lifted at runtime by AToolSlotLimit (slots 1001/2000 play).
@@ -13,4 +13,4 @@
 2. Compressed containers and legacy .pak mods are reported, not moved.
 3. Own-pak re-slotting through the port repo (port.py assigns slots, writes wav/names/PELA and the owner together) so the tool never has to guess for our packs.
 4. Code signing / SmartScreen, a license for public release, Nexus page text.
-5. AToolSlotLimit is built for one private UE4SS build (3.0.1, SHA 08a0733): re-test against the UE4SS version users have.
+5. AToolSlotLimit is verified only with RevOG SB-UE4SS 1.3 (the installed build; UE4SS.log says v3.0.1 Beta, Git SHA 08a0733). Symbol check 2026-11-25: Chrisr0/RE-UE4SS 3.1.0-5 (what PEFA lists) and SB-UE4SS 3.1.6 lack 5 CppUserModBase exports, so the DLL cannot load there. To support them: rebuild against that tree's headers (vtable differs). Until then the tool keeps the ceiling at 1000 on unverified builds.

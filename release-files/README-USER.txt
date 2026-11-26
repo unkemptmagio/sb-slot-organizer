@@ -47,14 +47,16 @@ files are left alone; the tool says so. A mod installed by hand that overwrites 
 mod's audio file before the first run cannot be told apart.
 
 OPTIONAL: MORE THAN 1000 SLOTS (advanced)
-ATOOL stops at slot 1000. The AToolSlotLimit mod lifts that at runtime. It needs UE4SS and is
-a native DLL built against ONE UE4SS build (the author's); on another build it may fail to
-load or crash the game at launch. Only install it if you know which UE4SS you run; to remove
-it delete the Mods\AToolSlotLimit folder. Install with install-atool-limit.bat (it never
-overwrites your config.txt / enabled.txt). Without it SlotOrganizer keeps everything within
-slots 1..1000. SlotOrganizer only uses slots above 1000 if the mod is installed and enabled -
-make sure it really loads (check the UE4SS log) before relying on that.
-
+ATOOL stops at slot 1000. The AToolSlotLimit mod lifts that at runtime. It is a native UE4SS mod and
+is verified ONLY with  RevOG SB-UE4SS 1.3  (Nexus; UE4SS.dll SHA-256 E0CC51CE...DABE, the build
+whose UE4SS.log says "v3.0.1 Beta ... Git SHA #08a0733").
+It does NOT load on the older 3.1.x Stellar Blade builds (Chrisr0/RE-UE4SS 3.1.0-x, the one PEFA
+lists as tested, or SB-UE4SS 3.1.6): the DLL needs C++ hooks those builds do not have. On those
+builds nothing breaks - UE4SS just skips the mod - but slots above 1000 will not work.
+  * install-atool-limit.bat checks your UE4SS and warns if it is not the verified build.
+  * SlotOrganizer only uses slots above 1000 when the mod is installed, enabled AND your UE4SS is
+    the verified build; otherwise it keeps everything within 1..1000 and tells you.
+  * It never overwrites your config.txt / enabled.txt. To remove it, delete Mods\AToolSlotLimit.
 WHAT IT WILL NOT DO (it reports instead of guessing)
   * legacy .pak-only mods (slot stored inside the pak) - ask the author for an IoStore build
   * compressed containers, or moving a slot to a different digit count (98 -> 100)
